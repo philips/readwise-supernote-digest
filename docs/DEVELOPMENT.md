@@ -45,16 +45,18 @@ claude mcp add --transport http --scope project supernote-docs https://docs.supe
 | React Native | pinned **0.79.2** | set by template, do not bump |
 | yarn | latest | check before scaffold |
 
-## Scaffold (once plugin specifics are decided)
+## Scaffold
 
-```bash
-npx @react-native-community/cli init plugin \
-  --template @supernote-plugin/sn-plugin-template --version 0.79.2
-```
+Done — see `plugin/` (`npx @react-native-community/cli init plugin --template
+@supernote-plugin/sn-plugin-template --version 0.79.2`, `ios/` removed, `npm install` run,
+`app.json`/`package.json` `name` set to `readwise-digest`, matching `pluginKey`/`appName` per the
+skill's rule). `PluginConfig.json` doesn't exist yet — it's generated on first `buildPlugin.sh`
+run, which needs the Android SDK (see below). Fields to fill in manually once it exists:
+`iconPath`, `desc`, `author`, `uses-permissions` (`plugin.permission.INTERNET` for Readwise calls,
+`FILE:READ`/`FILE:WRITE` if the digest sync needs to touch note files outside the current one).
 
-Expected to land at `./plugin` (see `scripts/snplg-deploy.sh` default `PLUGIN_DIR=plugin`).
-`PluginConfig.json` fields to fill in manually after first build: `iconPath`, `desc`, `author`,
-`uses-permissions` (e.g. `plugin.permission.INTERNET` for pushing to Readwise).
+See `plans/plan.md` for the full task breakdown, Readwise API contract, and the Task 3/4 digest
+ContentProvider permission-wall finding (confirmed on-device this session).
 
 ## Day-to-day loop
 
