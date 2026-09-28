@@ -3,13 +3,19 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {getHighlightCount, getReadwiseApiToken, deleteSetting} from '../db';
+import {getHighlightCount, getReadwiseApiToken, deleteSetting, getSetting, setSetting} from '../db';
 import {SettingsKey} from '../db/schema';
 import {syncHighlights, type SyncProgress} from '../readwise/sync';
+import {
+  syncPendingHighlightsToDigest,
+  getPendingDigestSyncCount,
+  type DigestSyncProgress,
+} from '../lib/digestSync';
 import {ensureInternetPermission} from '../lib/permissions';
 
 interface Props {
@@ -23,13 +29,39 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [digestSyncEnabled, setDigestSyncEnabled] = useState(false);
+  const [digestPendingCount, setDigestPendingCount] = useState<number | null>(null);
+  const [digestSyncing, setDigestSyncing] = useState(false);
+  const [digestProgress, setDigestProgress] = useState<DigestSyncProgress | null>(null);
+  const [digestError, setDigestError] = useState<string | null>(null);
+
   const refreshCount = useCallback(async () => {
     setCount(await getHighlightCount());
   }, []);
 
+  const refreshDigestPendingCount = useCallback(async () => {
+    setDigestPendingCount(await getPendingDigestSyncCount());
+  }, []);
+
   useEffect(() => {
     refreshCount();
-  }, [refreshCount]);
+    refreshDigestPendingCount();
+    getSetting(SettingsKey.DigestSyncEnabled).then(value => setDigestSyncEnabled(value === '1'));
+  }, [refreshCount, refreshDigestPendingCount]);
+
+  const handleDigestSync = async () => {
+    setDigestError(null);
+    setDigestSyncing(true);
+    setDigestProgress(null);
+    try {
+      await syncPendingHighlightsToDigest(setDigestProgress);
+      await refreshDigestPendingCount();
+    } catch (err) {
+      setDigestError(err instanceof Error ? err.message : 'Digest sync failed.');
+    } finally {
+      setDigestSyncing(false);
+    }
+  };
 
   const handleSync = async () => {
     setError(null);
@@ -50,11 +82,20 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
       }
       await syncHighlights(token, setProgress);
       await refreshCount();
+
+      if (digestSyncEnabled) {
+        await handleDigestSync();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed.');
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleToggleDigestSync = async (value: boolean) => {
+    setDigestSyncEnabled(value);
+    await setSetting(SettingsKey.DigestSyncEnabled, value ? '1' : '0');
   };
 
   const handleDisconnect = () => {
@@ -108,6 +149,41 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
             : 'Starting sync…'}
         </Text>
       ) : null}
+
+      <View style={styles.digestSection}>
+        <View style={styles.digestToggleRow}>
+          <Text style={styles.digestToggleLabel}>Sync into Digest</Text>
+          <Switch value={digestSyncEnabled} onValueChange={handleToggleDigestSync} />
+        </View>
+        <Text style={styles.digestSubtext}>
+          {digestPendingCount === null
+            ? ' '
+            : digestPendingCount === 0
+              ? 'Digest is up to date.'
+              : `${digestPendingCount} highlight${digestPendingCount === 1 ? '' : 's'} not yet in Digest.`}
+        </Text>
+
+        {digestError ? <Text style={styles.error}>{digestError}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.secondaryActionButton, digestSyncing && styles.buttonDisabled]}
+          onPress={handleDigestSync}
+          disabled={digestSyncing}>
+          {digestSyncing ? (
+            <ActivityIndicator color="#000000" />
+          ) : (
+            <Text style={styles.secondaryActionButtonText}>Sync to Digest now</Text>
+          )}
+        </TouchableOpacity>
+
+        {digestSyncing ? (
+          <Text style={styles.status}>
+            {digestProgress
+              ? `Syncing to Digest — ${digestProgress.synced} of ${digestProgress.total}`
+              : 'Starting Digest sync…'}
+          </Text>
+        ) : null}
+      </View>
 
       <TouchableOpacity style={styles.secondaryButton} onPress={handleDisconnect}>
         <Text style={styles.secondaryButtonText}>Disconnect Readwise</Text>
@@ -175,6 +251,29 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 16,
     fontWeight: '600',
+  },
+  digestSection: {
+    borderTopWidth: 1,
+    borderTopColor: '#dddddd',
+    marginTop: 8,
+    paddingTop: 16,
+    marginBottom: 8,
+  },
+  digestToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  digestToggleLabel: {
+    fontSize: 15,
+    color: '#000000',
+    fontWeight: '600',
+  },
+  digestSubtext: {
+    fontSize: 13,
+    color: '#555555',
+    marginBottom: 12,
   },
   secondaryButton: {
     paddingVertical: 12,

@@ -175,40 +175,46 @@ early in Task 3, not now (no scaffold/build environment yet — see Open Items).
     `PluginCommAPI.getPageDisplaySize()` (current file, ungated) rather than
     `PluginFileAPI.getPageSize` (silently permission-gated on some firmware — see skill gotcha #38).
 
-### Task 3 — Sync Readwise quotes into "the digest database" (revised interpretation)
+### Task 3 — Sync Readwise quotes into "the digest database" [SUPERSEDED — see "Task 3
+  implementation notes" near the end of this file]
 
-Given the ContentProvider path is blocked, propose implementing this entirely through the
-documented note-embedded digest TextBox primitive instead of a separate system database:
+The architecture below (a plugin-managed note file as a digest substitute) was the plan while the
+real ContentProvider was believed inaccessible from a plugin. On-device experimentation (prompted
+by explicit user request to keep digging rather than accept the note-file workaround) found that
+direct ContentProvider access to the real native Digest actually works. Task 3 is implemented via
+a small native module talking to `content://com.ratta.supernote.knowledge.provider` directly —
+no note file involved. Left here for history; skip to the implementation notes section for what
+actually shipped.
 
-- Maintain (or let the user pick) a dedicated note file, e.g. `Note/Readwise Digest.note`, created
-  via `PluginFileAPI` if it doesn't exist.
-- For each unsynced highlight (`synced_to_digest_at IS NULL`), insert a
-  `TYPE_TEXT_DIGEST_CREATE`/`_QUOTE` TextBox (same mechanism as Task 2) into that note, tagging
-  provenance via the "category postfix" concept from the note: prefix/suffix the book title with
-  `" (Readwise)"` or similar inside `textDigestData`/`textContentFull`, since we don't have a
-  first-class "category" field to set on a real digest DB row.
-- Setting: `digest_sync_enabled` toggle in plugin settings UI; background/periodic sync job (or
-  manual "Sync now" button — periodic background execution in a RN plugin process needs its own
-  investigation, likely triggered on plugin-open rather than true background cron).
-- **Do the on-device ContentProvider probe (see Research findings) before committing to this
-  fallback** — if it turns out pluginhost *does* have access through some path we haven't found
-  (e.g. a hidden SDK method, or the knowledge app itself exposing something via AIDL rather than
-  the ContentProvider), prefer that over the note-file workaround.
+~~Given the ContentProvider path is blocked, propose implementing this entirely through the
+documented note-embedded digest TextBox primitive instead of a separate system database~~:
 
-### Task 4 — Export digest entries to Readwise, avoiding loops
+- ~~Maintain (or let the user pick) a dedicated note file, e.g. `Note/Readwise Digest.note`,
+  created via `PluginFileAPI` if it doesn't exist.~~
+- ~~For each unsynced highlight (`synced_to_digest_at IS NULL`), insert a
+  `TYPE_TEXT_DIGEST_CREATE`/`_QUOTE` TextBox (same mechanism as Task 2) into that note~~ (also
+  turned out to be blocked independently — see Task 2 implementation notes, finding #3).
+- ~~Setting: `digest_sync_enabled` toggle in plugin settings UI~~ (this part carried over to the
+  real implementation unchanged).
 
-- Symmetric to Task 3: scan the same digest-tagged TextBoxes (ours, and potentially the user's own
-  manually-created `TYPE_TEXT_DIGEST_CREATE`/`_QUOTE` entries across all notes) via
-  `PluginFileAPI.getElements` per note/page.
-- Filter out entries whose `textDigestData`/tag marks them as Readwise-sourced (the same "Readwise"
-  category marker from Task 3) — prevents re-exporting what we just imported.
-- POST remaining entries to `POST /api/v2/highlights/` (`category` likely `"books"` with title =
-  the source note's name, or a dedicated category/source_type like `source_type: "supernote_digest"`
-  to distinguish in the user's Readwise dashboard).
-- Record what's been exported in `exported_digest_entries` to avoid re-sending unchanged entries
-  every sync (Readwise de-dupes by title/author/text/source_url anyway, but avoid the redundant
-  network calls).
-- Setting: `readwise_export_enabled` toggle, independent of Task 3's toggle.
+### Task 4 — Export digest entries to Readwise, avoiding loops [NOT YET IMPLEMENTED]
+
+Now that Task 3 has real read/write ContentProvider access, Task 4 should be symmetric and much
+more literal than originally planned:
+
+- Query the Digest DB directly (not note files) for user-created entries: `knowledge/by_source_type`
+  or scan `knowledge/by_knowledge_base` — need to check the decompiled `KnowledgeContentProvider`
+  (still in `/tmp/knowledge_src` as of this session, not committed to the repo — re-decompile
+  `/system_ext/app/SupernoteKnowledge/SupernoteKnowledge.apk` with jadx if needed) for the exact
+  query shape and which `source_type` values correspond to user-entered vs. our own Readwise-synced
+  rows.
+- Filter out entries whose `knowledge_base_unique_attribute` matches our cached Readwise category
+  (`SettingsKey.DigestCategoryUniqueAttribute`) — prevents re-exporting what Task 3 just imported.
+- POST remaining entries to `POST /api/v2/highlights/`.
+- Record what's been exported in `exported_digest_entries` (schema already has this table from
+  Task 1) to avoid re-sending unchanged entries every sync.
+- Setting: `readwise_export_enabled` toggle, independent of Task 3's toggle (schema already has
+  this key too).
 
 ---
 
@@ -241,9 +247,11 @@ documented note-embedded digest TextBox primitive instead of a separate system d
 3. ✅ Task 2: quote picker + insert-as-textbox. Verified end-to-end on-device -- a real
    Readwise quote now lands as a real TextBox on a real note page. See "Task 2 implementation
    notes" below.
-4. Task 3: on-device ContentProvider probe, then implement via chosen mechanism (fallback: digest
-   note file).
-5. Task 4: export path, symmetric to Task 3, with loop-prevention filter.
+4. \u2705 Task 3: real native Digest integration via direct ContentProvider access (not a note
+   file -- see "Task 3 implementation notes" near the end of this file for the full story).
+   Verified end-to-end: all 6472 cached highlights synced into the real Digest app's Manual Entry
+   tab, correct Category ("Readwise") and Author fields, zero errors.
+5. Task 4: export path, symmetric to Task 3, with loop-prevention filter. Not yet implemented.
 
 ## Task 1 implementation notes (2025 session)
 
@@ -400,3 +408,141 @@ real TextBox element -- quote text + `\u2014 book \u2014 author` attribution lin
 of the actual note page, persisted after `PluginCommAPI.reloadFile()`. The picker's "Inserted ✓"
 state and `inserted_into_note_at` DB bookkeeping (for a future "already inserted" indicator) both
 worked as designed.
+
+## Task 3 implementation notes: real native Digest integration (real device, real ContentProvider)
+
+**This is the one that changed direction mid-stream.** First pass at Task 3 built a
+note-file-based substitute for "the digest database" (a plugin-managed `Readwise Digest.note`,
+plain `TYPE_TEXT` boxes). User pushed back ("digest sync should not touch any note... can you
+explore an NPK to access the ContentProvider?") before that got committed, which led to actually
+re-testing the ContentProvider from inside a real running plugin instead of relying on the earlier
+static `dumpsys` analysis from the initial research phase. That re-test overturned the earlier
+"blocked" conclusion.
+
+### The probe
+
+Added a throwaway native module (`KnowledgeProbeModule.kt`, since replaced by the real
+`KnowledgeProviderModule.kt`) exposing a `ContentResolver.query()` call on
+`content://com.ratta.supernote.knowledge.provider`, wired into `MainApplication.kt`'s
+`getPackages()` (per `find_manual_react_packages_from_application` in `buildPlugin.sh` -- a
+custom `ReactPackage` needs a `.add(...)` call there to get picked up into
+`build/generated/PluginConfig.json`'s `reactPackages`, same requirement as the SQLite package back
+in Task 1). Result, tapped from a debug button in `Home.tsx`:
+
+```json
+{
+  "callingUid": 1000,
+  "packageName": "com.ratta.supernote.pluginhost",
+  "processName": "com.ratta.supernote.pluginhost",
+  "attempts": {
+    "bareAuthorityQuery": {"success": false, "exceptionType": "IllegalArgumentException",
+      "message": "Unknown URI: content://com.ratta.supernote.knowledge.provider"},
+    "digestSubpathQuery": {"success": false, "exceptionType": "IllegalArgumentException",
+      "message": "Unknown URI: content://com.ratta.supernote.knowledge.provider/digest"}
+  }
+}
+```
+
+No `SecurityException`. The earlier `adb shell content query` test (session start) got exactly
+that -- `Permission Denial ... requires READ_KNOWLEDGE` -- because `adb shell` runs as uid 2000,
+which holds nothing. pluginhost runs as **uid 1000** (`android.uid.system`, the same shared UID as
+`com.ratta.supernote.knowledge` itself), and that UID *does* pass the provider's permission check.
+The two `IllegalArgumentException`s just meant the guessed URI paths were wrong -- an entirely
+different, much better problem to have.
+
+### Reverse-engineering the real schema
+
+Pulled the live APK (`adb pull /system_ext/app/SupernoteKnowledge/SupernoteKnowledge.apk`),
+decompiled it with `jadx` (no `apktool`/`jadx` preinstalled; downloaded jadx 1.5.6 directly from
+GitHub releases). `KnowledgeContentProvider.java`'s permission gate:
+
+```java
+private void checkWritePermission() {
+    if (!isTrustedCaller() && getContext().checkCallingOrSelfPermission(WRITE_PERMISSION) != 0) {
+        throw new SecurityException(...);
+    }
+}
+private boolean isTrustedCaller() {
+    // hardcoded allowlist: document, note, settings, background, inkhub -- NOT pluginhost
+}
+```
+
+`isTrustedCaller()` doesn't include pluginhost, confirming the pass came from a genuine
+`checkCallingOrSelfPermission` grant tied to uid 1000, not an app-level allowlist bypass. (Why
+uid 1000 gets this: some combination of Android's system-UID permission short-circuiting and/or
+sharedUserId-level pooling within `android.uid.system` -- confirmed empirically, exact AOSP
+mechanism not pinned down further since it didn't matter once the behavior itself was verified.)
+
+Read `insert()`/`query()` in full to get the exact schema (all confirmed working end-to-end, see
+below):
+
+- **Category lookup**: `query(content://.../knowledge_base/by_name, selectionArgs=[name])` ->
+  cursor with `unique_attribute` column (empty if not found).
+- **Category creation** (NOT in the `isTrustedCaller()`-only blocklist, unlike the more obvious
+  `knowledge_base/insert_with_unique_attribute` endpoint, which *is* blocked): `insert(content://
+  .../knowledge_base, {name: "Readwise"})` -> returns a `Uri` with the new row's id appended;
+  `unique_attribute` is server-generated (`KnowledgeUtils.generateKnowledgeBaseUniqueValue()`) --
+  read it back via `query(content://.../knowledge_base/by_id/<id>)`.
+- **Entry creation** (also not blocked): `insert(content://.../knowledge/insert, values)` where
+  `values` is:
+  - `content` (String, required, <=15000 chars) -- the digest text
+  - `knowledge_base_unique_attribute` (String, optional) -- links to the category
+  - `source_type` (Int) -- `1`=document, `2`=note, `3`=system pasteboard, `4`=**self-add** (what
+    the "Manual Entry" tab's own "+" flow uses; using it is what makes our entries show up there)
+  - `metadata` (String, optional) -- a flat JSON object string, e.g. `{"author":"..."}`; internally
+    parsed/written via simple `org.json.JSONObject` (`KnowledgeUtils.setMetadataStringValue`), not
+    any richer schema
+  - `creation_time`/`last_modified_time` auto-fill via `System.currentTimeMillis()` if omitted
+- Several sibling endpoints genuinely *are* `isTrustedCaller()`-gated and out of reach for a plugin
+  regardless of the uid-1000 finding: tags (`knowledge/by_tag*`, `add_tags`, `update_tags`),
+  `knowledge/restore`, `knowledge_base/restore`, `knowledge_base/insert_with_unique_attribute`,
+  and (query-side) `knowledge/search/special_carousel`. None of these were needed for Task 3.
+
+### Implementation
+
+- `android/app/src/main/java/com/plugin/KnowledgeProviderModule.kt` +
+  `KnowledgeProviderPackage.kt`: `getOrCreateCategory(name)` (query-by-name, else insert +
+  read-back) and `insertEntry(content, categoryUniqueAttribute, metadataJson)`, both plain
+  `ContentResolver` calls, no SDK involvement at all.
+- `AndroidManifest.xml`: declares `<uses-permission>` for `READ_KNOWLEDGE`/`WRITE_KNOWLEDGE`
+  anyway, for documentation/defensiveness -- but per the above, this declaration in the plugin's
+  own npk manifest almost certainly has zero real effect (the npk is never `pm install`-ed as its
+  own package; see the Task 3 "Research findings" section above for why). The actual access comes
+  from pluginhost's own already-granted identity.
+- `src/lib/knowledgeProvider.ts`: thin wrapper.
+- `src/lib/digestSync.ts`: `getOrCreateDigestCategory` result cached in
+  `SettingsKey.DigestCategoryUniqueAttribute` so the category is only looked up/created once, not
+  on every sync; `syncPendingHighlightsToDigest` loops `getUnsyncedToDigestHighlights` in batches
+  of 25 (same pattern as Task 1's export sync), formats `author` as `"book — author"`, calls
+  `insertEntry`, marks `synced_to_digest_at` per-row so a partial failure is resumable.
+- `Home.tsx`: "Sync into Digest" toggle (`SettingsKey.DigestSyncEnabled`) + pending count +
+  "Sync to Digest now" button; wired so enabling the toggle also runs a Digest sync automatically
+  after every Readwise "Sync now".
+
+### Verified end-to-end on the real device, real Readwise account, zero errors
+
+Tapped "Sync to Digest now" against all 6472 cached highlights (no manual batching/limiting --
+the button syncs everything pending in one run). Progress UI counted up smoothly (~45
+entries/sec: 62 -> 731 -> 2533 -> 5263 -> "Digest is up to date" over about 2.5 minutes total),
+zero errors the whole way. Opened the real Digest app (`KnowledgeActivity`) afterward:
+
+- **Manual Entry** tab: **6472** (matches exactly).
+- Opened an individual entry's detail view: **Category: Readwise**, **Author: ... — jyn** (the
+  `"book — author"` format from `digestSync.ts`), exact quote text, dated today, "From: Manual
+  Entry". Indistinguishable from an entry a user typed by hand via the "+" button, except we did
+  it programmatically for 6472 highlights in ~2.5 minutes.
+- Bonus: the entry detail view has its own **Annotations** (handwriting/keyboard) section --
+  something we get for free by using the real feature instead of a synthetic substitute.
+
+### Residual notes for later
+
+- The decompiled source lives at `/tmp/knowledge_src` on this dev machine (not committed --
+  disposable, re-generate from the live APK + jadx if needed again for Task 4).
+- `KnowledgeContentProvider`'s `delete()` method wasn't read in detail this session (only
+  `insert()`/`query()`) -- check its `isTrustedCaller()` blocklist before assuming Task 4 (or a
+  future "un-sync" feature) can delete rows the same way.
+- This entire mechanism is undocumented, reverse-engineered, and could change on a Supernote
+  firmware update (new `isTrustedCaller()` list, revoked uid-1000 grant, schema changes, etc.) with
+  no warning and no changelog to check against. Worth a defensive try/catch around the whole Task 3
+  flow surfacing a clear "Digest sync isn't working, Supernote may have changed something" error
+  rather than a raw exception, and worth re-verifying after any firmware update.

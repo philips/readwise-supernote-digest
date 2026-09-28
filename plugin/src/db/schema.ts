@@ -76,6 +76,13 @@ export const SettingsKey = {
   DigestSyncEnabled: 'digest_sync_enabled',
   ReadwiseExportEnabled: 'readwise_export_enabled',
   DigestCategory: 'digest_category',
+  /** Cached `unique_attribute` of the native Digest "knowledge_base" row matching
+   * SettingsKey.DigestCategory, so we don't need to look it up (or risk re-creating it) on every
+   * sync. See src/lib/digestSync.ts. */
+  DigestCategoryUniqueAttribute: 'digest_category_unique_attribute',
 } as const;
 
 export type SettingsKeyType = (typeof SettingsKey)[keyof typeof SettingsKey];
+
+/** Default value for SettingsKey.DigestCategory when unset. */
+export const DEFAULT_DIGEST_CATEGORY = 'Readwise';

@@ -214,6 +214,34 @@ export async function markHighlightInsertedIntoNote(
   ]);
 }
 
+export async function markHighlightSyncedToDigest(
+  readwiseId: number,
+  timestamp: string,
+): Promise<void> {
+  await runSQL('UPDATE highlights SET synced_to_digest_at = ? WHERE readwise_id = ?', [
+    timestamp,
+    readwiseId,
+  ]);
+}
+
+export async function getUnsyncedToDigestHighlights(
+  limit = 25,
+): Promise<LocalHighlightRow[]> {
+  const {rows} = await runSQL(
+    `SELECT * FROM highlights WHERE is_deleted = 0 AND synced_to_digest_at IS NULL
+     ORDER BY highlighted_at ASC LIMIT ?`,
+    [limit],
+  );
+  return rows as LocalHighlightRow[];
+}
+
+export async function getUnsyncedToDigestCount(): Promise<number> {
+  const {rows} = await runSQL(
+    'SELECT COUNT(*) as count FROM highlights WHERE is_deleted = 0 AND synced_to_digest_at IS NULL',
+  );
+  return rows.length > 0 ? Number(rows[0].count) : 0;
+}
+
 export async function clearAllData(): Promise<void> {
   await runSQL('DELETE FROM highlights');
   await runSQL('DELETE FROM settings');
