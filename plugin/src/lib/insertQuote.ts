@@ -27,8 +27,8 @@ export interface QuoteToInsert {
   bookAuthor?: string | null;
 }
 
-const MARGIN_PX = 80;
-const WIDTH_RATIO = 0.86;
+const TOP_MARGIN_PX = 80;
+const WIDTH_RATIO = 0.8;
 const DEFAULT_FONT_SIZE = 28;
 /** Rough estimate (no text-measurement API available) so the box isn't absurdly short for a
  * long quote. Supernote lets the user drag-resize afterward regardless. */
@@ -84,6 +84,9 @@ export async function insertQuoteIntoCurrentNote(quote: QuoteToInsert): Promise<
 
   const text = formatQuoteText(quote);
   const width = Math.max(200, Math.round(pageWidth * WIDTH_RATIO));
+  // Centered horizontally -- previously left-anchored near the page edge, which put it right
+  // under the NOTE app's fixed left-side toolbar overlay and got visually cut off.
+  const left = Math.round((pageWidth - width) / 2);
   const estimatedLines = Math.max(1, Math.ceil(text.length / CHARS_PER_LINE_ESTIMATE));
   const height = Math.max(MIN_HEIGHT_PX, estimatedLines * LINE_HEIGHT_PX + LINE_HEIGHT_PX);
 
@@ -102,7 +105,12 @@ export async function insertQuoteIntoCurrentNote(quote: QuoteToInsert): Promise<
     fontSize: DEFAULT_FONT_SIZE,
     fontPath: null,
     textContentFull: text,
-    textRect: {left: MARGIN_PX, top: MARGIN_PX, right: MARGIN_PX + width, bottom: MARGIN_PX + height},
+    textRect: {
+      left,
+      top: TOP_MARGIN_PX,
+      right: left + width,
+      bottom: TOP_MARGIN_PX + height,
+    },
     textDigestData: null,
     textAlign: 0,
     textBold: 0,
