@@ -288,6 +288,47 @@ documented note-embedded digest TextBox primitive instead of a separate system d
   `npx tsc --noEmit`, `npx eslint`, and `npx react-native bundle --platform android --dev false`
   all pass/succeed, including resolving the vendored SQLite native module through autolinking
   (`npx react-native config` lists it) and the app's UI strings landing in the built bundle.
-  **Not yet verified**: actual SQLite read/write, Readwise network calls, and the INTERNET
-  permission prompt on a real device — needs the Android SDK installed and a real `buildPlugin.sh`
-  → `scripts/snplg-deploy.sh` → `scripts/snplg-logs.sh` loop.
+
+## Task 1 on-device verification (real device + real Readwise account)
+
+Installed the Android SDK (platform 35, build-tools 35.0.0) and a JDK 21 (system JDK 25 is too new
+for Gradle 8.13 — `Unsupported class file major version 69`; installed Temurin 21 to `~/jdks/`,
+set `JAVA_HOME` only for the Gradle invocation). Full `buildPlugin.sh` → `scripts/snplg-deploy.sh`
+→ device loop confirmed working.
+
+**Real bug found in `buildPlugin.sh`** (not our plugin code): it computes the `reactPackages`
+array for `PluginConfig.json` by parsing
+`android/app/build/generated/autolinking/src/main/java/com/facebook/react/PackageList.java` — but
+that file is only generated as a side effect of the Gradle native build, which runs *after*
+`update_plugin_config_packages` in the script's `main()`. Net effect: **the first build of any
+fresh project always ships an empty `reactPackages` array**, silently breaking every custom native
+module (`NativeModules.X` would be `null` at runtime, per skill gotcha #33) with no build error or
+warning. Re-running `buildPlugin.sh` a second time (the autolinking file now exists from build #1)
+correctly picks up `org.pgsqlite.SQLitePluginPackage`. **Always build twice on a fresh project /
+after adding a new native dependency**, and check `build/generated/PluginConfig.json`'s
+`reactPackages` isn't empty before trusting a build.
+
+**Real bug found and fixed in our own code**: `src/readwise/client.ts`'s `fetchExportPage` used
+`URLSearchParams.set()` to build the `updatedAfter`/`pageCursor` query params. React Native's
+built-in `URLSearchParams` polyfill (`Libraries/Blob/URLSearchParams.js`) is a deliberately small
+subset of the spec — it only implements `append()`/`toString()`/iteration from an object
+constructor; `.set()`/`.get()`/`.has()`/`.delete()`/`.sort()` all unconditionally
+`throw new Error('URLSearchParams.X is not implemented')`. Not caught by `tsc` (DOM lib types
+declare the full spec) or the Metro bundle smoke test (nothing exercised the code path). Surfaced
+only when a real user entered a real token: auth succeeded, page 1 of the export succeeded (no
+query params needed on page 1), then the crash hit on page 2's `pageCursor` param. Fixed by
+building the query string by hand (`encodeURIComponent` + manual `&`-join) instead of relying on
+any `URLSearchParams` method beyond what's known-safe. **Takeaway**: any web API usage should be
+checked against RN's actual polyfill, not MDN or TypeScript's DOM lib types, before assuming it
+works on-device.
+
+**End-to-end confirmed working on real hardware with a real Readwise account**:
+- Plugin installs, loads (`Running "readwise-digest"`), SQLite DB initializes.
+- Routes to Setup screen when no token stored; routes to Home when one is.
+- `INTERNET` permission dialog fires correctly (`plugin.permission.INTERNET` declared +
+  `hasPermission`/`requestPermission` flow), "Always Allow" persists across app sessions.
+- Real network calls reach Readwise's live API; bad-token rejection shows the correct error copy.
+- Full paginated export sync completed successfully after the fix: **6472 highlights** synced and
+  persisted to SQLite (started from a partial 505 left over from the pre-fix crash, confirming the
+  upsert path safely resumes/re-runs), "Sync now" returns to idle state with the final count, no
+  crashes or exceptions anywhere in the `pluginhost` process log throughout.

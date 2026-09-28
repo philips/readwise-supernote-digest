@@ -75,10 +75,18 @@ export async function fetchExportPage(
   token: string,
   params: ExportPageParams = {},
 ): Promise<ReadwiseExportResponse> {
-  const query = new URLSearchParams();
-  if (params.updatedAfter) {query.set('updatedAfter', params.updatedAfter);}
-  if (params.pageCursor) {query.set('pageCursor', params.pageCursor);}
-  const qs = query.toString();
+  // Deliberately not using URLSearchParams: React Native's built-in polyfill
+  // (Libraries/Blob/URLSearchParams.js) only implements append()/toString()/iteration --
+  // .set()/.get()/.has()/.delete()/.sort() all throw "not implemented" at runtime (confirmed
+  // on-device). Building the query string by hand sidesteps relying on polyfill coverage at all.
+  const queryParts: string[] = [];
+  if (params.updatedAfter) {
+    queryParts.push(`updatedAfter=${encodeURIComponent(params.updatedAfter)}`);
+  }
+  if (params.pageCursor) {
+    queryParts.push(`pageCursor=${encodeURIComponent(params.pageCursor)}`);
+  }
+  const qs = queryParts.join('&');
   const url = `${BASE_URL}/export/${qs ? `?${qs}` : ''}`;
 
   const res = await fetch(url, {method: 'GET', headers: authHeader(token)});
