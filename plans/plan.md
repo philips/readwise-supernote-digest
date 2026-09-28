@@ -233,11 +233,61 @@ documented note-embedded digest TextBox primitive instead of a separate system d
 
 ## Suggested build order
 
-1. Scaffold plugin project (`plugin/`), wire up `scripts/snplg-*.sh` (already parameterized for
+1. ✅ Scaffold plugin project (`plugin/`), wire up `scripts/snplg-*.sh` (already parameterized for
    `plugin/` as the default dir).
-2. Task 1: settings/setup UI, SQLite schema, Readwise auth + export sync. Get this fully working
-   and deployed to the device first — establishes the whole toolchain end-to-end.
+2. ✅ Task 1 (code complete, not yet device-tested): settings/setup UI, SQLite schema, Readwise
+   auth + export sync. See "Task 1 implementation notes" below.
 3. Task 2: quote picker + insert-as-textbox. Reverse-engineer `textDigestData` shape here.
 4. Task 3: on-device ContentProvider probe, then implement via chosen mechanism (fallback: digest
    note file).
 5. Task 4: export path, symmetric to Task 3, with loop-prevention filter.
+
+## Task 1 implementation notes (2025 session)
+
+- SQLite via `react-native-sqlite-storage`, vendored under `plugin/node_change/` per the skill's
+  Pattern 11 (`node_change/` = patched third-party native deps, auto-detected by `buildPlugin.sh`).
+  Had to actually patch it to be usable at all:
+  - Its `platforms/android/build.gradle` pinned AGP 3.1.4 via `jcenter()` in its own nested
+    `buildscript{}` block — jcenter's been fully shut down since Feb 2024, this would have failed
+    outright. Removed the block (the root project's already-applied AGP classpath covers it, since
+    everything here uses the classic non-`plugins{}`-DSL application style); added the `namespace
+    'org.pgsqlite'` AGP 7+/8+ requires and wasn't declared; renamed `lintOptions` → `lint`.
+  - Its `package.json` `devDependencies` (`react-native@^0.63.2`, `react-native-windows`) caused
+    `npm install` to nest-install a *second, ancient* `node_modules/react-native` tree inside
+    `node_change/react-native-sqlite-storage/` on every install (83MB, and a real risk of Metro
+    resolving the wrong RN version for files under that directory — exactly the kind of
+    version-mismatch the skill warns crashes silently on-device). Stripped `devDependencies`
+    entirely; the library has no runtime `dependencies` so this was pure bloat.
+  - Trimmed unused `ios`/`windows`/legacy `android-native` (prebuilt `.so` libs) platform dirs —
+    cut the vendored copy from ~8MB to ~1.2MB. Updated `react-native.config.js` to only declare
+    the `android` platform.
+  - **Important, not yet verified on-device**: per the Android native source
+    (`SQLitePlugin.java`), the `location` open option is actually a no-op on Android — it always
+    resolves via `Context#getDatabasePath(name)` on whichever process is calling (i.e.
+    `com.ratta.supernote.pluginhost`, since plugin JS runs inside that process). That means the DB
+    filename, not `location`, is what isolates this plugin's storage from any other plugin's in the
+    shared pluginhost process. Handled by namespacing the filename with this plugin's own
+    `pluginID` (`readwise-digest-<pluginID>.db`, see `src/db/index.ts`) rather than trusting
+    `location: 'plugins/<pluginID>/'` per the skill's literal snippet.
+- Pre-created `plugin/PluginConfig.json` by hand (16-char lowercase-alphanumeric `pluginID`,
+  matching `new_random_string 16` in `buildPlugin.sh`) instead of letting the build script
+  auto-generate it on first build — `buildPlugin.sh` skips generation entirely if this file already
+  exists, so `uses-permissions: ["plugin.permission.INTERNET"]` is stable across every rebuild
+  rather than needing to be re-added by hand after each `PluginConfig.json` regeneration.
+- `sn-plugin-lib` — scaffold's default `"^0.1.19"` actually resolved to `0.1.65` (the real latest
+  0.1.x), which is good since `hasPermission`/`requestPermission` (needed for the `INTERNET` gate)
+  were only added in 0.1.65. Pinned explicitly to `"0.1.65"` in `package.json` rather than leaving
+  the loose `^0.1.19` range, so a future `npm install` can't silently drift onto a breaking SDK
+  version (see the skill's version-gated-facts warning at the top of `SKILL.md`).
+- Readwise sync (`src/readwise/sync.ts`) follows Readwise's own recommended pattern: full sync on
+  first run (no `updatedAfter`), follow `nextPageCursor` until null, persist the sync's *start*
+  time (not finish time) as `last_export_updated_after` so nothing updated mid-sync gets missed on
+  the next incremental pull. Rate-limit (`429`) handling retries using the `Retry-After` header, up
+  to 3 attempts.
+- Verified without a device (no Android SDK on this machine yet — see "Open items" above):
+  `npx tsc --noEmit`, `npx eslint`, and `npx react-native bundle --platform android --dev false`
+  all pass/succeed, including resolving the vendored SQLite native module through autolinking
+  (`npx react-native config` lists it) and the app's UI strings landing in the built bundle.
+  **Not yet verified**: actual SQLite read/write, Readwise network calls, and the INTERNET
+  permission prompt on a real device — needs the Android SDK installed and a real `buildPlugin.sh`
+  → `scripts/snplg-deploy.sh` → `scripts/snplg-logs.sh` loop.

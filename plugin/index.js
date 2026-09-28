@@ -6,36 +6,18 @@ import {AppRegistry, Image} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
 
-import { PluginManager } from 'sn-plugin-lib';
+import {PluginManager} from 'sn-plugin-lib';
 
 AppRegistry.registerComponent(appName, () => App);
 
+// Must run after registerComponent -- everything else silently fails otherwise.
 PluginManager.init();
 
+// Toolbar button (NOTE + DOC): opens the setup flow / main plugin view.
+// Lasso button for "insert quote into note" (Task 2) will be added alongside that feature.
 PluginManager.registerButton(1, ['NOTE', 'DOC'], {
   id: 100,
-  name: 'Side Button',
-  icon: Image.resolveAssetSource(
-    require('./assets/icon.png'),
-  ).uri,
-  showType: 1,
-});
-
-PluginManager.registerButton(2, ['NOTE', 'DOC'], {
-  id: 200,
-  name: 'Lasso Button',
-  icon: Image.resolveAssetSource(
-    require('./assets/icon.png'),
-  ).uri,
-  editDataTypes: [0, 1, 2, 3, 4],
-  showType: 1,
-});
-
-PluginManager.registerButton(3, ['NOTE', 'DOC'], {
-  id: 300,
-  name: 'Selection Button',
-  icon: Image.resolveAssetSource(
-    require('./assets/icon.png'),
-  ).uri,
+  name: 'Readwise Digest',
+  icon: Image.resolveAssetSource(require('./assets/icon.png')).uri,
   showType: 1,
 });

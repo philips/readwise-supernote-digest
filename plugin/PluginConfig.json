@@ -1,0 +1,12 @@
+{
+  "name": "readwise-digest",
+  "desc": "Sync Readwise highlights with Supernote notes and digest.",
+  "author": "",
+  "iconPath": "",
+  "versionName": "0.0.1",
+  "versionCode": "1",
+  "pluginID": "5hmif2r6vihq6bos",
+  "pluginKey": "readwise-digest",
+  "jsMainPath": "index",
+  "uses-permissions": ["plugin.permission.INTERNET"]
+}

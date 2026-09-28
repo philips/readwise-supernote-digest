@@ -1,0 +1,40 @@
+// NOTE: patched for use under node_change/ in the readwise-digest Supernote plugin.
+// Removed the library's own `buildscript{}` block (pinned AGP 3.1.4 via the now-defunct
+// jcenter()) -- the root project's already-applied AGP classpath (android/build.gradle,
+// AGP resolved via @react-native/gradle-plugin) covers `apply plugin: 'com.android.library'`
+// for included subprojects under the classic (non `plugins{}`-DSL) application style used here.
+// Also added `namespace` (required by AGP 7+/8+, this library predates that requirement) and
+// renamed `lintOptions` -> `lint` (AGP 8 deprecates the old name).
+apply plugin: 'com.android.library'
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+android {
+    namespace 'org.pgsqlite'
+    compileSdkVersion safeExtGet('compileSdkVersion', 23)
+    buildToolsVersion safeExtGet('buildToolsVersion', '27.0.3')
+
+    defaultConfig {
+        minSdkVersion safeExtGet('minSdkVersion', 16)
+        targetSdkVersion safeExtGet('targetSdkVersion', 22)
+        versionCode 1
+        versionName "1.0"
+    }
+    lint {
+        abortOnError false
+    }
+}
+
+repositories {
+    mavenCentral()
+    google()
+    maven {
+        url "https://maven.google.com"
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-native:+'
+}
