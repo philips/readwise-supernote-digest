@@ -204,6 +204,16 @@ export async function listHighlights(
   return rows as LocalHighlightRow[];
 }
 
+export async function markHighlightInsertedIntoNote(
+  readwiseId: number,
+  timestamp: string,
+): Promise<void> {
+  await runSQL('UPDATE highlights SET inserted_into_note_at = ? WHERE readwise_id = ?', [
+    timestamp,
+    readwiseId,
+  ]);
+}
+
 export async function clearAllData(): Promise<void> {
   await runSQL('DELETE FROM highlights');
   await runSQL('DELETE FROM settings');

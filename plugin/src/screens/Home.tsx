@@ -14,9 +14,10 @@ import {ensureInternetPermission} from '../lib/permissions';
 
 interface Props {
   onSignOut: () => void;
+  onInsertQuote: () => void;
 }
 
-export default function Home({onSignOut}: Props): React.JSX.Element {
+export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Element {
   const [count, setCount] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
@@ -85,14 +86,18 @@ export default function Home({onSignOut}: Props): React.JSX.Element {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      <TouchableOpacity style={styles.button} onPress={onInsertQuote}>
+        <Text style={styles.buttonText}>Insert quote into note</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity
-        style={[styles.button, syncing && styles.buttonDisabled]}
+        style={[styles.secondaryActionButton, syncing && styles.buttonDisabled]}
         onPress={handleSync}
         disabled={syncing}>
         {syncing ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color="#000000" />
         ) : (
-          <Text style={styles.buttonText}>Sync now</Text>
+          <Text style={styles.secondaryActionButtonText}>Sync now</Text>
         )}
       </TouchableOpacity>
 
@@ -154,6 +159,20 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryActionButton: {
+    borderWidth: 1,
+    borderColor: '#000000',
+    borderRadius: 4,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  secondaryActionButtonText: {
+    color: '#000000',
     fontSize: 16,
     fontWeight: '600',
   },

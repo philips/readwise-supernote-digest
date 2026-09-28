@@ -235,9 +235,12 @@ documented note-embedded digest TextBox primitive instead of a separate system d
 
 1. ✅ Scaffold plugin project (`plugin/`), wire up `scripts/snplg-*.sh` (already parameterized for
    `plugin/` as the default dir).
-2. ✅ Task 1 (code complete, not yet device-tested): settings/setup UI, SQLite schema, Readwise
-   auth + export sync. See "Task 1 implementation notes" below.
-3. Task 2: quote picker + insert-as-textbox. Reverse-engineer `textDigestData` shape here.
+2. ✅ Task 1: settings/setup UI, SQLite schema, Readwise auth + export sync. Verified
+   end-to-end on-device with a real account (6472 highlights synced). See "Task 1 implementation
+   notes" below.
+3. ✅ Task 2: quote picker + insert-as-textbox. Verified end-to-end on-device -- a real
+   Readwise quote now lands as a real TextBox on a real note page. See "Task 2 implementation
+   notes" below.
 4. Task 3: on-device ContentProvider probe, then implement via chosen mechanism (fallback: digest
    note file).
 5. Task 4: export path, symmetric to Task 3, with loop-prevention filter.
@@ -332,3 +335,68 @@ works on-device.
   persisted to SQLite (started from a partial 505 left over from the pre-fix crash, confirming the
   upsert path safely resumes/re-runs), "Sync now" returns to idle state with the final count, no
   crashes or exceptions anywhere in the `pluginhost` process log throughout.
+
+## Task 2 implementation notes (real device, real note, real Readwise data)
+
+Implementation: `src/lib/insertQuote.ts` (insertion logic), `src/screens/InsertQuote.tsx`
+(searchable picker screen, wired into `Home` via a new "Insert quote into note" button and a
+third `App.tsx` route). Uses `PluginCommAPI.getCurrentFilePath/getCurrentPageNum/
+getPageDisplaySize` + `PluginNoteAPI.saveCurrentNote` + `PluginCommAPI.createElement` +
+`PluginCommAPI.insertPageElements` (the current-file element CRUD family, not
+`PluginFileAPI.insertElements`, per `getPageDisplaySize`'s own doc note about coordinate
+mismatches).
+
+Three real, on-device-only bugs found and fixed this session (none caught by `tsc`/eslint/Metro
+bundling -- all only surfaced by actually running on hardware):
+
+1. **`ElementType` isn't exported from `sn-plugin-lib`'s public index**, despite every
+   docs.supernote.com code example importing it that way (`import { ElementType } from
+   'sn-plugin-lib'`). Checked `node_modules/sn-plugin-lib/lib/typescript/src/index.d.ts` directly:
+   only `Element` is exported. The same type constants (`TYPE_TEXT`, `TYPE_TEXT_DIGEST_CREATE`,
+   etc.) are duplicated as `static readonly` properties directly on the exported `Element` class --
+   use `Element.TYPE_TEXT` etc. instead. Would have been a `tsc` error immediately if actually
+   attempted (`Module '"sn-plugin-lib"' has no exported member 'ElementType'`), so low-risk, but
+   worth remembering before copy-pasting any docs example.
+
+2. **`element.recycle()` (shown in docs examples, declared on the `Element` *class* in the .d.ts)
+   doesn't exist on the object `PluginCommAPI.createElement()` actually returns at runtime** --
+   confirmed by reading `node_modules/sn-plugin-lib/lib/module/sdk/PluginCommAPI.js`:
+   `createElement`'s result is a plain object from the native bridge, augmented with a couple of
+   `ElementDataAccessor` fields (`angles`, `contoursSrc`), never wrapped in a real `Element`
+   instance with prototype methods. Calling `.recycle()` on it throws `"undefined is not a
+   function"` on-device (first real error hit this session, screenshot-confirmed). Fixed by using
+   the static `PluginCommAPI.recycleElement(element.uuid)` instead (which is genuinely what
+   `.recycle()` would have delegated to). `tsc` didn't catch this either -- the `Element` class's
+   `.d.ts` type includes `recycle(): Promise<void>` as a real method, so the loose object shape
+   returned at runtime type-checks fine against it despite not actually having that method.
+
+3. **Digest-type TextBoxes (`Element.TYPE_TEXT_DIGEST_CREATE` / `_QUOTE`, 501/502) cannot actually
+   be *inserted* via `insertPageElements`**, contradicting the docs table's explicit claim
+   ("Digest created TextBox ... can be inserted and edited only on the main layer"). On-device,
+   every attempt -- regardless of the `textEditable` field value (tried both `0` and `1`) --
+   fails with `"The digest text box is not editable!"`. Since Task 2 only asks for "a textbox" (no
+   digest-styling requirement), switched to the plain `Element.TYPE_TEXT` (500), which works
+   exactly as documented. **Open question for later**: is creating a *new* digest textbox from a
+   plugin simply unsupported (only Supernote's own native "save to digest" gesture can produce
+   one, and plugins can only read/modify *existing* ones -- matching that `modifyLassoText`'s docs
+   example switches on `TYPE_TEXT_DIGEST_QUOTE/_CREATE` but no `insertElements`/`insertPageElements`
+   example ever does), or is there some other required field we're missing? Worth revisiting if a
+   future task specifically needs the digest visual styling; for now Task 2 uses plain `TYPE_TEXT`
+   with a thin border (`textFrameStyle: 3`) to look visually distinct instead.
+
+4. Also needed `plugin.permission.FILE:WRITE` (declared in `PluginConfig.json` `uses-permissions`,
+   requested via the same `hasPermission`/`requestPermission` pattern as `INTERNET` in Task 1) --
+   confirmed on-device that `createElement`/`insertPageElements`/`saveCurrentNote` are gated behind
+   it even though they only operate on the already-open current file. This contradicts the skill's
+   own claim ("Operations that stay inside the currently-open file via PluginCommAPI... don't need
+   any of this") -- that claim holds for read-ish calls like `lassoElements`/`setLassoBoxState`,
+   but not for ones that persist a write to the file, at least on this firmware.
+
+**End-to-end confirmed working**: opened the plugin from inside a real, pre-existing note ("math",
+14 pages, real handwritten content) via the NOTE app's Plugins toolbar entry, browsed/searched the
+6472 cached Readwise highlights in the new picker screen, tapped "Insert into note" on a real
+highlight (a quote from *Tokens Too Cheap to Meter* by jyn), and confirmed via screenshot that a
+real TextBox element -- quote text + `\u2014 book \u2014 author` attribution line -- now appears at the top
+of the actual note page, persisted after `PluginCommAPI.reloadFile()`. The picker's "Inserted ✓"
+state and `inserted_into_note_at` DB bookkeeping (for a future "already inserted" indicator) both
+worked as designed.

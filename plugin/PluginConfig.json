@@ -8,5 +8,5 @@
   "pluginID": "5hmif2r6vihq6bos",
   "pluginKey": "readwise-digest",
   "jsMainPath": "index",
-  "uses-permissions": ["plugin.permission.INTERNET"]
+  "uses-permissions": ["plugin.permission.INTERNET", "plugin.permission.FILE:WRITE"]
 }

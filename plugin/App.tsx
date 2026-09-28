@@ -10,8 +10,9 @@ import {PluginManager} from 'sn-plugin-lib';
 import {initDatabase, getReadwiseApiToken} from './src/db';
 import Setup from './src/screens/Setup';
 import Home from './src/screens/Home';
+import InsertQuote from './src/screens/InsertQuote';
 
-type Route = 'loading' | 'setup' | 'home';
+type Route = 'loading' | 'setup' | 'home' | 'insert';
 
 function App(): React.JSX.Element {
   const [route, setRoute] = useState<Route>('loading');
@@ -55,8 +56,10 @@ function App(): React.JSX.Element {
     );
   } else if (route === 'setup') {
     body = <Setup onComplete={() => setRoute('home')} />;
+  } else if (route === 'insert') {
+    body = <InsertQuote onBack={() => setRoute('home')} />;
   } else {
-    body = <Home onSignOut={() => setRoute('setup')} />;
+    body = <Home onSignOut={() => setRoute('setup')} onInsertQuote={() => setRoute('insert')} />;
   }
 
   return (
