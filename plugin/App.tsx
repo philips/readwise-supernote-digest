@@ -9,20 +9,26 @@ import {ActivityIndicator, Pressable, StyleSheet, Text, View} from 'react-native
 import {PluginManager} from 'sn-plugin-lib';
 import {initDatabase, getReadwiseApiToken} from './src/db';
 import Setup from './src/screens/Setup';
-import Home from './src/screens/Home';
+import SyncExport from './src/screens/SyncExport';
 import InsertQuote from './src/screens/InsertQuote';
+import Tab from './src/components/Tab';
+import {Color} from './src/theme';
 
-type Route = 'loading' | 'setup' | 'home' | 'insert';
+type Route = 'loading' | 'setup' | 'main';
+type MainTab = 'insert' | 'syncExport';
 
 function App(): React.JSX.Element {
   const [route, setRoute] = useState<Route>('loading');
   const [initError, setInitError] = useState<string | null>(null);
+  // Defaults to "Insert a Quote" -- that's the action most likely to be why someone opened the
+  // plugin from inside a note, so it shouldn't be a tap away behind a sync/settings screen.
+  const [tab, setTab] = useState<MainTab>('insert');
 
   const bootstrap = useCallback(async () => {
     try {
       await initDatabase();
       const token = await getReadwiseApiToken();
-      setRoute(token ? 'home' : 'setup');
+      setRoute(token ? 'main' : 'setup');
     } catch (err) {
       setInitError(err instanceof Error ? err.message : 'Failed to initialize plugin storage.');
     }
@@ -55,11 +61,27 @@ function App(): React.JSX.Element {
       </View>
     );
   } else if (route === 'setup') {
-    body = <Setup onComplete={() => setRoute('home')} />;
-  } else if (route === 'insert') {
-    body = <InsertQuote onBack={() => setRoute('home')} />;
+    body = <Setup onComplete={() => setRoute('main')} />;
   } else {
-    body = <Home onSignOut={() => setRoute('setup')} onInsertQuote={() => setRoute('insert')} />;
+    body = (
+      <View style={styles.mainContainer}>
+        <View style={styles.tabBar}>
+          <Tab label="Insert a Quote" active={tab === 'insert'} onPress={() => setTab('insert')} />
+          <Tab
+            label="Sync and Export"
+            active={tab === 'syncExport'}
+            onPress={() => setTab('syncExport')}
+          />
+        </View>
+        <View style={styles.tabContent}>
+          {tab === 'insert' ? (
+            <InsertQuote />
+          ) : (
+            <SyncExport onSignOut={() => setRoute('setup')} />
+          )}
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -75,12 +97,26 @@ function App(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Color.background,
   },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  mainContainer: {
+    flex: 1,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingTop: 24,
+    paddingHorizontal: 24,
+    borderBottomColor: Color.border,
+    borderBottomWidth: 2,
+  },
+  tabContent: {
+    flex: 1,
   },
   closeButton: {
     position: 'absolute',
@@ -93,10 +129,10 @@ const styles = StyleSheet.create({
   },
   closeText: {
     fontSize: 18,
-    color: '#000000',
+    color: Color.text,
   },
   errorText: {
-    color: '#a00000',
+    color: Color.error,
     fontSize: 15,
     padding: 24,
     textAlign: 'center',

@@ -13,6 +13,7 @@ import {syncHighlights, type SyncProgress} from '../readwise/sync';
 import {setSetting} from '../db';
 import {SettingsKey} from '../db/schema';
 import {ensureInternetPermission} from '../lib/permissions';
+import {Color, FontSize} from '../theme';
 
 type Status = 'idle' | 'checking-permission' | 'validating' | 'syncing' | 'error';
 
@@ -101,7 +102,7 @@ export default function Setup({onComplete}: Props): React.JSX.Element {
         onPress={handleConnect}
         disabled={busy}>
         {busy ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color={Color.background} />
         ) : (
           <Text style={styles.buttonText}>Connect</Text>
         )}
@@ -124,39 +125,37 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 24,
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Color.background,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: '#000000',
+    fontSize: FontSize.title,
+    fontWeight: '700',
+    marginBottom: 16,
+    color: Color.text,
   },
   body: {
-    fontSize: 15,
-    color: '#333333',
-    marginBottom: 4,
+    fontSize: FontSize.body,
+    color: Color.mutedText,
+    marginBottom: 6,
   },
   link: {
-    fontSize: 15,
-    color: '#000000',
+    fontSize: FontSize.body,
+    color: Color.text,
     textDecorationLine: 'underline',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    marginBottom: 12,
-    color: '#000000',
+    borderWidth: 2,
+    borderColor: Color.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: FontSize.input,
+    marginBottom: 16,
+    color: Color.text,
   },
   button: {
-    backgroundColor: '#000000',
-    borderRadius: 4,
-    paddingVertical: 12,
+    backgroundColor: Color.text,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -164,19 +163,19 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: Color.background,
+    fontSize: FontSize.button,
+    fontWeight: '700',
   },
   error: {
-    color: '#a00000',
-    fontSize: 14,
+    color: Color.error,
+    fontSize: FontSize.meta,
     marginBottom: 12,
   },
   status: {
     marginTop: 16,
-    fontSize: 14,
-    color: '#333333',
+    fontSize: FontSize.meta,
+    color: Color.mutedText,
     textAlign: 'center',
   },
 });

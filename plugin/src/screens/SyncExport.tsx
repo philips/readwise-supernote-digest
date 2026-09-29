@@ -16,14 +16,21 @@ import {
   getPendingDigestSyncCount,
   type DigestSyncProgress,
 } from '../lib/digestSync';
+import {
+  exportPendingDigestEntries,
+  getPendingDigestExportCount,
+  type DigestExportProgress,
+} from '../lib/digestExport';
 import {ensureInternetPermission} from '../lib/permissions';
+import {Color, FontSize} from '../theme';
 
 interface Props {
   onSignOut: () => void;
-  onInsertQuote: () => void;
 }
 
-export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Element {
+/** Tab content ("Sync and Export") -- highlight cache status plus the two Digest bridges.
+ * Quote-insertion lives in its own tab (src/screens/InsertQuote.tsx) now, not here. */
+export default function SyncExport({onSignOut}: Props): React.JSX.Element {
   const [count, setCount] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
@@ -35,6 +42,12 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
   const [digestProgress, setDigestProgress] = useState<DigestSyncProgress | null>(null);
   const [digestError, setDigestError] = useState<string | null>(null);
 
+  const [exportEnabled, setExportEnabled] = useState(false);
+  const [exportPendingCount, setExportPendingCount] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<DigestExportProgress | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const refreshCount = useCallback(async () => {
     setCount(await getHighlightCount());
   }, []);
@@ -43,11 +56,17 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
     setDigestPendingCount(await getPendingDigestSyncCount());
   }, []);
 
+  const refreshExportPendingCount = useCallback(async () => {
+    setExportPendingCount(await getPendingDigestExportCount());
+  }, []);
+
   useEffect(() => {
     refreshCount();
     refreshDigestPendingCount();
+    refreshExportPendingCount();
     getSetting(SettingsKey.DigestSyncEnabled).then(value => setDigestSyncEnabled(value === '1'));
-  }, [refreshCount, refreshDigestPendingCount]);
+    getSetting(SettingsKey.ReadwiseExportEnabled).then(value => setExportEnabled(value === '1'));
+  }, [refreshCount, refreshDigestPendingCount, refreshExportPendingCount]);
 
   const handleDigestSync = async () => {
     setDigestError(null);
@@ -60,6 +79,20 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
       setDigestError(err instanceof Error ? err.message : 'Digest sync failed.');
     } finally {
       setDigestSyncing(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExportError(null);
+    setExporting(true);
+    setExportProgress(null);
+    try {
+      await exportPendingDigestEntries(setExportProgress);
+      await refreshExportPendingCount();
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Export to Readwise failed.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -86,6 +119,9 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
       if (digestSyncEnabled) {
         await handleDigestSync();
       }
+      if (exportEnabled) {
+        await handleExport();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed.');
     } finally {
@@ -96,6 +132,11 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
   const handleToggleDigestSync = async (value: boolean) => {
     setDigestSyncEnabled(value);
     await setSetting(SettingsKey.DigestSyncEnabled, value ? '1' : '0');
+  };
+
+  const handleToggleExport = async (value: boolean) => {
+    setExportEnabled(value);
+    await setSetting(SettingsKey.ReadwiseExportEnabled, value ? '1' : '0');
   };
 
   const handleDisconnect = () => {
@@ -118,8 +159,6 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Readwise Digest</Text>
-
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Highlights cached</Text>
         <Text style={styles.cardValue}>{count === null ? '…' : count}</Text>
@@ -127,18 +166,14 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={onInsertQuote}>
-        <Text style={styles.buttonText}>Insert quote into note</Text>
-      </TouchableOpacity>
-
       <TouchableOpacity
-        style={[styles.secondaryActionButton, syncing && styles.buttonDisabled]}
+        style={[styles.primaryButton, syncing && styles.buttonDisabled]}
         onPress={handleSync}
         disabled={syncing}>
         {syncing ? (
-          <ActivityIndicator color="#000000" />
+          <ActivityIndicator color={Color.background} />
         ) : (
-          <Text style={styles.secondaryActionButtonText}>Sync now</Text>
+          <Text style={styles.primaryButtonText}>Sync now</Text>
         )}
       </TouchableOpacity>
 
@@ -150,12 +185,12 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
         </Text>
       ) : null}
 
-      <View style={styles.digestSection}>
-        <View style={styles.digestToggleRow}>
-          <Text style={styles.digestToggleLabel}>Sync into Digest</Text>
+      <View style={styles.section}>
+        <View style={styles.toggleRow}>
+          <Text style={styles.sectionLabel}>Sync into Digest</Text>
           <Switch value={digestSyncEnabled} onValueChange={handleToggleDigestSync} />
         </View>
-        <Text style={styles.digestSubtext}>
+        <Text style={styles.subtext}>
           {digestPendingCount === null
             ? ' '
             : digestPendingCount === 0
@@ -166,13 +201,13 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
         {digestError ? <Text style={styles.error}>{digestError}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.secondaryActionButton, digestSyncing && styles.buttonDisabled]}
+          style={[styles.secondaryButton, digestSyncing && styles.buttonDisabled]}
           onPress={handleDigestSync}
           disabled={digestSyncing}>
           {digestSyncing ? (
-            <ActivityIndicator color="#000000" />
+            <ActivityIndicator color={Color.text} />
           ) : (
-            <Text style={styles.secondaryActionButtonText}>Sync to Digest now</Text>
+            <Text style={styles.secondaryButtonText}>Sync to Digest now</Text>
           )}
         </TouchableOpacity>
 
@@ -185,8 +220,43 @@ export default function Home({onSignOut, onInsertQuote}: Props): React.JSX.Eleme
         ) : null}
       </View>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleDisconnect}>
-        <Text style={styles.secondaryButtonText}>Disconnect Readwise</Text>
+      <View style={styles.section}>
+        <View style={styles.toggleRow}>
+          <Text style={styles.sectionLabel}>Export Digest to Readwise</Text>
+          <Switch value={exportEnabled} onValueChange={handleToggleExport} />
+        </View>
+        <Text style={styles.subtext}>
+          {exportPendingCount === null
+            ? ' '
+            : exportPendingCount === 0
+              ? 'Nothing new to export.'
+              : `${exportPendingCount} Digest ${exportPendingCount === 1 ? 'entry' : 'entries'} not yet on Readwise.`}
+        </Text>
+
+        {exportError ? <Text style={styles.error}>{exportError}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
+          onPress={handleExport}
+          disabled={exporting}>
+          {exporting ? (
+            <ActivityIndicator color={Color.text} />
+          ) : (
+            <Text style={styles.secondaryButtonText}>Export to Readwise now</Text>
+          )}
+        </TouchableOpacity>
+
+        {exporting ? (
+          <Text style={styles.status}>
+            {exportProgress
+              ? `Exporting — ${exportProgress.exported} of ${exportProgress.total}`
+              : 'Starting export…'}
+          </Text>
+        ) : null}
+      </View>
+
+      <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
+        <Text style={styles.disconnectButtonText}>Disconnect Readwise</Text>
       </TouchableOpacity>
     </View>
   );
@@ -196,103 +266,94 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    backgroundColor: '#ffffff',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 20,
-    color: '#000000',
+    backgroundColor: Color.background,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 4,
-    padding: 16,
+    borderWidth: 2,
+    borderColor: Color.border,
+    padding: 20,
     marginBottom: 20,
     alignItems: 'center',
   },
   cardLabel: {
-    fontSize: 14,
-    color: '#333333',
+    fontSize: FontSize.meta,
+    color: Color.mutedText,
   },
   cardValue: {
-    fontSize: 32,
+    fontSize: 40,
     fontWeight: '700',
-    color: '#000000',
+    color: Color.text,
     marginTop: 4,
   },
-  button: {
-    backgroundColor: '#000000',
-    borderRadius: 4,
-    paddingVertical: 12,
+  primaryButton: {
+    backgroundColor: Color.text,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   buttonDisabled: {
     opacity: 0.5,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
+  primaryButtonText: {
+    color: Color.background,
+    fontSize: FontSize.button,
+    fontWeight: '700',
   },
-  secondaryActionButton: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 4,
-    paddingVertical: 11,
+  secondaryButton: {
+    borderWidth: 2,
+    borderColor: Color.border,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-  secondaryActionButtonText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '600',
+  secondaryButtonText: {
+    color: Color.text,
+    fontSize: FontSize.button,
+    fontWeight: '700',
   },
-  digestSection: {
-    borderTopWidth: 1,
-    borderTopColor: '#dddddd',
-    marginTop: 8,
-    paddingTop: 16,
+  section: {
+    borderTopWidth: 2,
+    borderTopColor: Color.mutedBorder,
+    marginTop: 12,
+    paddingTop: 20,
     marginBottom: 8,
   },
-  digestToggleRow: {
+  toggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
   },
-  digestToggleLabel: {
-    fontSize: 15,
-    color: '#000000',
-    fontWeight: '600',
+  sectionLabel: {
+    fontSize: FontSize.body,
+    color: Color.text,
+    fontWeight: '700',
   },
-  digestSubtext: {
-    fontSize: 13,
-    color: '#555555',
-    marginBottom: 12,
+  subtext: {
+    fontSize: FontSize.meta,
+    color: Color.mutedText,
+    marginBottom: 14,
   },
-  secondaryButton: {
-    paddingVertical: 12,
+  disconnectButton: {
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  secondaryButtonText: {
-    color: '#a00000',
-    fontSize: 14,
+  disconnectButtonText: {
+    color: Color.error,
+    fontSize: FontSize.meta,
   },
   error: {
-    color: '#a00000',
-    fontSize: 14,
+    color: Color.error,
+    fontSize: FontSize.meta,
     marginBottom: 12,
   },
   status: {
     marginTop: -4,
     marginBottom: 12,
-    fontSize: 14,
-    color: '#333333',
+    fontSize: FontSize.meta,
+    color: Color.mutedText,
     textAlign: 'center',
   },
 });

@@ -11,17 +11,16 @@ import {
 import {listHighlights, markHighlightInsertedIntoNote} from '../db';
 import type {LocalHighlightRow} from '../readwise/types';
 import {insertQuoteIntoCurrentNote} from '../lib/insertQuote';
-
-interface Props {
-  onBack: () => void;
-}
+import {Color, FontSize} from '../theme';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const RESULTS_LIMIT = 30;
 
 type InsertState = 'idle' | 'inserting' | 'inserted' | 'error';
 
-export default function InsertQuote({onBack}: Props): React.JSX.Element {
+/** Tab content -- no header/back button of its own, the tab bar in App.tsx is the only
+ * navigation. See plans/plan.md for the "default to Insert a Quote" UX decision. */
+export default function InsertQuote(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<LocalHighlightRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +83,7 @@ export default function InsertQuote({onBack}: Props): React.JSX.Element {
           disabled={state === 'inserting'}
           onPress={() => handleInsert(item)}>
           {state === 'inserting' ? (
-            <ActivityIndicator size="small" color="#ffffff" />
+            <ActivityIndicator size="small" color={Color.background} />
           ) : (
             <Text style={styles.insertButtonText}>
               {state === 'inserted'
@@ -101,13 +100,6 @@ export default function InsertQuote({onBack}: Props): React.JSX.Element {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.backText}>{'\u2039 Back'}</Text>
-        </Pressable>
-        <Text style={styles.title}>Insert a quote</Text>
-      </View>
-
       <TextInput
         style={styles.searchInput}
         value={query}
@@ -140,33 +132,18 @@ export default function InsertQuote({onBack}: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
-    paddingTop: 24,
-  },
-  header: {
-    paddingHorizontal: 24,
-    marginBottom: 12,
-  },
-  backText: {
-    fontSize: 15,
-    color: '#000000',
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#000000',
+    backgroundColor: Color.background,
+    paddingTop: 20,
   },
   searchInput: {
     marginHorizontal: 24,
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    marginBottom: 12,
-    color: '#000000',
+    borderWidth: 2,
+    borderColor: Color.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: FontSize.input,
+    marginBottom: 16,
+    color: Color.text,
   },
   loading: {
     marginTop: 40,
@@ -174,8 +151,8 @@ const styles = StyleSheet.create({
   empty: {
     marginTop: 40,
     textAlign: 'center',
-    color: '#333333',
-    fontSize: 15,
+    color: Color.mutedText,
+    fontSize: FontSize.body,
     paddingHorizontal: 24,
   },
   list: {
@@ -183,42 +160,41 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#cccccc',
-    borderRadius: 4,
-    padding: 14,
-    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: Color.mutedBorder,
+    padding: 16,
+    marginBottom: 16,
   },
   quoteText: {
-    fontSize: 15,
-    color: '#000000',
-    marginBottom: 6,
+    fontSize: FontSize.body,
+    lineHeight: FontSize.body * 1.35,
+    color: Color.text,
+    marginBottom: 8,
   },
   attribution: {
-    fontSize: 13,
-    color: '#555555',
-    marginBottom: 10,
+    fontSize: FontSize.meta,
+    color: Color.mutedText,
+    marginBottom: 12,
   },
   insertButton: {
-    backgroundColor: '#000000',
-    borderRadius: 4,
-    paddingVertical: 8,
+    backgroundColor: Color.text,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
-    paddingHorizontal: 14,
+    paddingHorizontal: 20,
   },
   insertButtonDisabled: {
     opacity: 0.5,
   },
   insertButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
+    color: Color.background,
+    fontSize: FontSize.meta,
     fontWeight: '600',
   },
   error: {
-    color: '#a00000',
-    fontSize: 14,
+    color: Color.error,
+    fontSize: FontSize.meta,
     marginHorizontal: 24,
     marginBottom: 12,
   },
