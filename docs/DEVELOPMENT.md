@@ -118,6 +118,10 @@ Highlights most likely to bite early:
   to exactly `19.0.0` too (peer ranges are loose enough to let a newer `react` slip in and crash
   silently on-device with no error in `npm test`).
 
+## Releases
+
+Tagged releases are built by CI; see [`RELEASING.md`](RELEASING.md).
+
 ## Reference repos
 
 - https://github.com/philips/olaink — real-world monorepo plugin + Cloudflare Worker relay;

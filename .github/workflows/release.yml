@@ -1,0 +1,194 @@
+name: Build and release the Supernote plugin
+
+# Every push to main and every pull request builds, tests and verifies a .snplg (downloadable as a
+# workflow artifact). Pushing a tag like v0.2.0 additionally publishes that exact archive as a
+# GitHub release. See docs/RELEASING.md.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "plugin/**"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "plugin/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+# Builds for a branch are superseded by newer pushes; a tag build is never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Test, build and verify the plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version_name: ${{ steps.version.outputs.name }}
+      version_code: ${{ steps.version.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the version code is the commit count, and tag checks need history
+
+      - name: Validate the release tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' must look like v1.2.3 or v1.2.3-rc.1"; exit 1
+          fi
+          # Releases come from main only, so an unreviewed branch can't ship.
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tagged commit $GITHUB_SHA is not on main"; exit 1
+          fi
+          # Versions only go up. Compare with the newest other release tag by version order.
+          PREVIOUS="$(git tag --list 'v[0-9]*' | grep -vxF "$TAG" | sort -V | tail -n 1 || true)"
+          if [[ -n "$PREVIOUS" ]]; then
+            NEWEST="$(printf '%s\n%s\n' "$PREVIOUS" "$TAG" | sort -V | tail -n 1)"
+            if [[ "$NEWEST" != "$TAG" || "$PREVIOUS" == "$TAG" ]]; then
+              echo "::error::$TAG is not newer than the existing tag $PREVIOUS"; exit 1
+            fi
+            # Plugin Manager only upgrades in place when versionCode rises.
+            if ! [[ "$(git rev-list --count HEAD)" -gt "$(git rev-list --count "$PREVIOUS")" ]]; then
+              echo "::error::$TAG has no more commits than $PREVIOUS, so its versionCode would not increase"; exit 1
+            fi
+          fi
+
+      - name: Compute the plugin version
+        id: version
+        run: |
+          # versionCode must strictly increase for Plugin Manager to upgrade in place: the commit
+          # count does, on a linear main. Development builds use the same scheme, so a newer dev
+          # build upgrades an older release (and the other way round is refused, as it should be).
+          CODE="$(git rev-list --count HEAD)"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            NAME="$GITHUB_REF_NAME"
+          else
+            NAME="dev-$(git rev-parse --short=7 HEAD)"
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Building $NAME (versionCode $CODE)"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22 # the tests use node:sqlite, which needs Node >= 22.13
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: plugin
+
+      - name: Typecheck, lint and unit tests
+        working-directory: plugin
+        run: |
+          npx tsc --noEmit
+          npx eslint src App.tsx index.js __tests__
+          npx jest --ci
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            plugin/android/**/*.gradle*
+            plugin/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Native unit tests (PDF and EPUB metadata readers)
+        run: ./gradlew :app:testDebugUnitTest
+        working-directory: plugin/android
+
+      - name: Build the plugin archive
+        working-directory: plugin
+        env:
+          PLUGIN_VERSION_NAME: ${{ steps.version.outputs.name }}
+          PLUGIN_VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: bash ./buildPlugin.sh
+
+      - name: Verify the plugin archive
+        working-directory: plugin
+        run: |
+          bash ./verifySnplg.sh \
+            --expect-version-name "${{ steps.version.outputs.name }}" \
+            --expect-version-code "${{ steps.version.outputs.code }}" \
+            build/outputs/readwise-digest.snplg
+          bash ./testVerifySnplg.sh build/outputs/readwise-digest.snplg
+
+      - name: Name the archive
+        run: cp plugin/build/outputs/readwise-digest.snplg "readwise-digest-${{ steps.version.outputs.name }}.snplg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: readwise-digest-snplg
+          path: readwise-digest-*.snplg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish the GitHub release
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: build
+    runs-on: ubuntu-latest
+    # Optional: add required reviewers to the "release" environment in the repository settings to
+    # gate publishing behind an approval.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          name: readwise-digest-snplg
+          path: release-assets
+
+      # Publish exactly what the build job tested; look again before it goes public.
+      - name: Verify the archive being published
+        env:
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          ASSET="release-assets/readwise-digest-${VERSION_NAME}.snplg"
+          test -f "$ASSET" || { echo "::error::$ASSET missing from the build artifact"; exit 1; }
+          [[ "$VERSION_NAME" == "$GITHUB_REF_NAME" ]] || { echo "::error::built $VERSION_NAME but tag is $GITHUB_REF_NAME"; exit 1; }
+          bash plugin/verifySnplg.sh --expect-version-name "$VERSION_NAME" --expect-version-code "$VERSION_CODE" "$ASSET"
+          (cd release-assets && sha256sum "readwise-digest-${VERSION_NAME}.snplg" > "readwise-digest-${VERSION_NAME}.snplg.sha256")
+          cat "release-assets/readwise-digest-${VERSION_NAME}.snplg.sha256"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          {
+            echo "### Supernote plugin"
+            echo ""
+            echo "Version \`${VERSION_NAME}\` (versionCode ${VERSION_CODE})."
+            echo ""
+            echo "Install \`readwise-digest-${VERSION_NAME}.snplg\`: copy it to the \`MyStyle\` folder on your"
+            echo "Supernote and install it from Settings > Apps > Plugins (Add Plugin). Installing over an older"
+            echo "version upgrades it in place and keeps your settings and cached highlights."
+            echo "The \`.sha256\` file is the archive's checksum."
+            echo ""
+            echo "---"
+          } > release-notes.md
+          FLAGS=()
+          # v1.2.3-rc.1 and friends are marked as pre-releases.
+          if [[ "$VERSION_NAME" == *-* ]]; then FLAGS+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" \
+            --title "Readwise Digest ${VERSION_NAME}" --notes-file release-notes.md \
+            --generate-notes "${FLAGS[@]}"

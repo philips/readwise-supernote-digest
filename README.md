@@ -46,6 +46,16 @@ you save to Digest yourself.
 Anything *you* save to Digest (not synced in from Readwise) can be exported back to your Readwise
 library, with automatic loop-prevention so Readwise-sourced entries never get re-exported.
 
+## Install
+
+Download `readwise-digest-vX.Y.Z.snplg` from the
+[latest release](https://github.com/philips/readwise-supernote-digest/releases/latest), copy it to
+the `MyStyle` folder on your Supernote, and install it from Settings > Apps > Plugins (Add Plugin).
+Installing a newer release over an older one upgrades it in place and keeps your settings and cached
+highlights. Each release also has a `.sha256` file for the archive.
+
+To build it yourself, see [Quick start](#quick-start). Maintainers: [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## How it works
 
 - **Local cache**: `sn-plugin-lib` SQLite storage, keyed to the Readwise API's `export`/`highlights`
