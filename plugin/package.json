@@ -8,7 +8,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "verify:plugin": "./verifySnplg.sh build/outputs/readwise-digest.snplg && ./testVerifySnplg.sh build/outputs/readwise-digest.snplg"
   },
   "dependencies": {
     "react": "19.0.0",

@@ -423,6 +423,39 @@ PY
 }
 
 # =========================================================
+# Function: apply_version_override
+# Purpose: Stamp a release version into the generated (not the committed) PluginConfig.json.
+#          Used by the release workflow: versionName = git tag, versionCode = commit count
+#          (strictly increasing, which is what Plugin Manager needs to upgrade in place).
+# Env:     PLUGIN_VERSION_NAME (any non-empty string), PLUGIN_VERSION_CODE (decimal integer)
+# Params:  $1 path to build/generated/PluginConfig.json
+# =========================================================
+apply_version_override() {
+    local cfg="$1"
+    local name="${PLUGIN_VERSION_NAME:-}"
+    local code="${PLUGIN_VERSION_CODE:-}"
+    [[ -z "$name" && -z "$code" ]] && return 0
+
+    if [[ -n "$code" && ! "$code" =~ ^[0-9]+$ ]]; then
+        write_color_output "PLUGIN_VERSION_CODE must be a decimal integer, got: $code" "Red"
+        exit 1
+    fi
+    command -v python3 >/dev/null 2>&1 || { write_color_output "python3 required to set the version" "Red"; exit 1; }
+
+    PLUGIN_CONFIG="$cfg" python3 - <<'PY'
+import json, os
+path = os.environ["PLUGIN_CONFIG"]
+cfg = json.load(open(path, encoding="utf-8-sig"))
+if os.environ.get("PLUGIN_VERSION_NAME"):
+    cfg["versionName"] = os.environ["PLUGIN_VERSION_NAME"]
+if os.environ.get("PLUGIN_VERSION_CODE"):
+    cfg["versionCode"] = os.environ["PLUGIN_VERSION_CODE"]  # the SDK stores it as a string
+open(path, "w", encoding="utf-8").write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+PY
+    write_color_output "Version set to ${name:-<unchanged>} (code ${code:-<unchanged>})" "Blue"
+}
+
+# =========================================================
 # Function: test_has_android_native_code
 # Purpose: Detect Android native sources or compiled classes
 # Params: $1 project root
@@ -691,6 +724,7 @@ main() {
 
     local gen_cfg="$gen_dir/PluginConfig.json"
     cp "$root_cfg" "$gen_cfg"
+    apply_version_override "$gen_cfg"
     copy_icon_and_update_path "$project_root" "$gen_dir" "$gen_cfg"
 
     local project_react_pkgs

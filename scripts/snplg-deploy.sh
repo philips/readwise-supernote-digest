@@ -54,6 +54,12 @@ adb get-state >/dev/null
 # --- build -------------------------------------------------------------
 if [ "$NO_BUILD" = 0 ]; then
   step "building $PLUGIN_DIR"
+  # Same scheme as the release workflow (docs/RELEASING.md): versionCode = commit count, so a local
+  # build installs over a CI build of the same or an older commit. Override with the env vars.
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    export PLUGIN_VERSION_CODE="${PLUGIN_VERSION_CODE:-$(git rev-list --count HEAD)}"
+    export PLUGIN_VERSION_NAME="${PLUGIN_VERSION_NAME:-local-$(git rev-parse --short=7 HEAD)}"
+  fi
   if [ -x ./buildPlugin.sh ]; then
     ./buildPlugin.sh >/dev/null
   else
