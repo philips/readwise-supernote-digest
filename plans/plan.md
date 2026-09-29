@@ -270,9 +270,10 @@ source_url, so the title must come from the file and must be **stable** across r
   `comment`); export those with `title`/`author` from `resolveDocumentInfo`, `category: 'books'`,
   `location`/`location_type: 'page'` from `sourcePage`, `note` from `comment`, and key
   `exported_digest_entries` by row id as now. Loop prevention is unaffected.
-- Decide behaviour when a file is unreadable (permission denied / sync folder): export under the
-  filename guess, or skip and tell the user? A guess that later upgrades to the real title would
-  create duplicates on Readwise -- probably skip unless the user opts in.
+- Unreadable or metadata-less files: **decided** -- export under the filename-derived title (and
+  author, if the name has one) rather than skipping. The serverlink sync folder is the main case;
+  see https://github.com/philips/readwise-supernote-digest/issues/1. Because the title is cached
+  and sticky, a later upgrade to real metadata won't rename already-exported highlights.
 - Notes (`source_type = 2`): title = the `.note` file name, page from `metadata.note_page`; needs
   its own toggle, and a decision on whether handwriting recognition text belongs in Readwise.
 - XMP metadata for PDFs whose Info dictionary is empty (2 of 12 sampled).
