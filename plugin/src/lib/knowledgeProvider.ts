@@ -61,3 +61,24 @@ export interface ManualDigestEntry {
 export async function listManualDigestEntries(): Promise<ManualDigestEntry[]> {
   return getNativeModule().queryManualEntries();
 }
+
+/** Digest source_type buckets (docs/KNOWLEDGE_PROVIDER.md "source_type"). */
+export const DigestSourceType = {
+  Document: 1,
+  Note: 2,
+  ManualEntry: 4,
+} as const;
+
+/** A Digest entry with its origin file. `sourcePath` is only meaningful for Document and Note
+ * entries; `sourcePage` is 1-based for documents. */
+export interface DigestEntry extends ManualDigestEntry {
+  sourceType: number;
+  sourcePath: string | null;
+  sourcePage: string | null;
+  comment: string | null;
+}
+
+/** Lists every Digest entry of one bucket, e.g. highlights made while reading PDFs/EPUBs. */
+export async function listDigestEntriesBySourceType(sourceType: number): Promise<DigestEntry[]> {
+  return getNativeModule().queryEntriesBySourceType(sourceType);
+}

@@ -61,9 +61,9 @@ See [`plans/plan.md`](plans/plan.md) for the full task-by-task design/implementa
 
 ## Known gaps
 
-Only Manual Entry Digest entries are exported to Readwise so far; exporting **Documents** and
-**Notes** highlights needs title/author extraction from PDFs and EPUBs. See "Open issues" in
-[`plans/plan.md`](plans/plan.md).
+Only Manual Entry Digest entries are exported to Readwise so far. Exporting **Documents** highlights
+is in progress: reading title and author from PDFs and EPUBs is implemented and tested, but not yet
+wired into the export. See "Open issues" in [`plans/plan.md`](plans/plan.md).
 
 ## Device
 

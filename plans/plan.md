@@ -224,46 +224,60 @@ Resolved this round (see "Round 3 fixes" at the end of this file): duplicate re-
 Setup screenshot, leftover test entry, deleted highlights lingering in the local cache, and an
 empty-cache hole in export loop-prevention. Still open:
 
-### 1. Export Documents and Notes highlights to Readwise
+### 1. Export Documents and Notes highlights to Readwise -- extraction done, export not wired yet
 
-Task 4 only exports the **Manual Entry** tab (`source_type = 4`). Highlights the user makes while
-reading PDFs/EPUBs (**Documents**, `source_type = 1`) or that are saved from handwritten notes
-(**Notes**, `source_type = 2`) never reach Readwise. Those are arguably the most valuable ones to
-export -- they are the actual reading highlights.
+Task 4 only exports the **Manual Entry** tab (`source_type = 4`). Highlights made while reading
+PDFs/EPUBs (**Documents**, `source_type = 1`) or saved from handwritten notes (**Notes**,
+`source_type = 2`) never reach Readwise. A Digest row has **no title or author column**; Readwise
+needs a title (required whenever `source_type` is set) and de-dupes on title + author + text +
+source_url, so the title must come from the file and must be **stable** across runs.
 
-What we have to work with (`docs/KNOWLEDGE_PROVIDER.md`): the Digest row has **no title or author
-column**. Available: `content`, `source_path` (absolute path to the PDF/EPUB/.note), `source_page`,
-`metadata` (JSON; for notes: `note_page`, `note_pageId`, `note_fileId`), `creation_time`. Readwise
-wants `title` (required whenever `source_type` is set -- see the 400 we hit), `author`, and
-optionally `category` (`books`/`articles`), `location` + `location_type: "page"`, `source_url`.
-Readwise de-dupes on title + author + text + source_url, so a stable title/author per document
-matters: if title parsing changes between runs, every highlight re-imports as a duplicate.
+**Done: title/author extraction** (`src/lib/documentInfo/`, `android/.../docmeta/`)
+- Native, pure-JVM, no library: EPUB (zip -> `container.xml` -> OPF `dc:title`/`dc:creator`,
+  only `aut`/role-less creators) and PDF (last `startxref` -> classic xref table or xref stream with
+  PNG predictor, following `/Prev`, -> `/Info`, including Info inside an object stream; UTF-16/UTF-8/
+  Latin-1 text strings; refuses encrypted files). Reads only the file tail plus a few objects, so a
+  370 MB scan costs the same as a paper. 36 JUnit tests over generated fixtures
+  (`./gradlew :app:testDebugUnitTest`), mutation-checked.
+- Validated on 158 real files from the device (146 EPUB, 12 PDF): every EPUB gave title + author,
+  10/12 PDFs did (the other two have no Info dictionary), max 35 ms. Embedded metadata is much
+  better than filenames (`_` for `:`, "Title, The" inversion, `Unknown - Author.pdf` naming).
+  `RealFilesScanTest` is an opt-in scan (`DOCMETA_DIR=... DOCMETA_OUT=...`).
+- JS policy: embedded metadata, else filename (`Title - Author.ext`, split on the last " - ").
+  Junk detection ("Untitled", "Microsoft Word - x.doc", filenames-as-titles, "Admin" as author),
+  "Last, First" and trailing-article normalisation. Cached per path in `document_info` and
+  **sticky**: once a document has a title it keeps it, so a later metadata edit can't turn already
+  exported highlights into duplicates. Exception: a filename guess made because the read failed
+  is upgraded once the file becomes readable.
+- 108 jest tests on the above (`__tests__/documentInfo.*`).
 
-Approach to investigate, cheapest first:
-- **Filename heuristics.** Real examples on the device: `Concrete Mathematics_ A Fou... Donald E.
-  Knuth.pdf`, `Winnie-the-Pooh - A. A. Milne.epub`, `Fables - Aesop.epub`, `1987-mcdermott.pdf`,
-  `The_Boy_and_the_Tape.pdf`. Mixed: some have "Title - Author", most PDFs don't. Fallback only.
-- **EPUB metadata.** An EPUB is a zip; `META-INF/container.xml` points at the OPF, which has
-  `<dc:title>` / `<dc:creator>`. Easy in Kotlin (`java.util.zip` + an XML parser) -- no new
-  dependency, but it's another native method in `KnowledgeProviderModule` (or a sibling module).
-- **PDF metadata.** The Info dictionary (`/Title`, `/Author`) or XMP. Trailer/xref parsing by hand
-  is fragile (compressed object streams, encrypted files); a library such as PdfBox-Android is the
-  robust option but adds APK size and needs `node_change/`-style vendoring. Many PDFs (e.g.
-  scanned/converted papers) have empty or junk Info, so filename fallback is still required.
-- **Notes.** Title = the `.note` file name (no author; use the user, or omit). Page from
-  `metadata.note_page`. Needs a decision on whether handwritten-note highlights belong in
-  Readwise at all -- probably behind its own toggle.
-- Cache parsed title/author per `source_path` (SQLite) so files are parsed once, and so the
-  title stays stable for Readwise's de-dupe.
-- Parsing the files means reading them from the plugin process. We currently declare only
-  `INTERNET` and `FILE:WRITE`; the native module would read via plain `java.io`/`ContentResolver`
-  in pluginhost's process, so first check what pluginhost can actually open (e.g.
-  `/storage/emulated/0/Document`) and whether the SDK's `FILE:READ` gate applies to native code
-  (it did gate native sockets for INTERNET, so assume yes and declare it).
-- Bookkeeping: `exported_digest_entries` is already keyed by Digest row id, so it extends as is.
-  Loop prevention is unaffected (these rows are never in the Readwise category).
-- Also decide what to do about the highlight's own color/handwriting annotations (`comment_str`,
-  handwriting) -- could map `comment_str` to Readwise's `note`.
+**Findings from testing on the device**
+- Reading needs **`plugin.permission.FILE:READ`** (now declared; `ensureFileReadPermission()`).
+  The host enforces it in native code too (`SecurityException: ... no READ permission on sdcard`).
+  It is only prompted for when something calls it -- nothing does yet.
+- Digest `source_path` is **relative to shared storage** (`Document/Foo.epub`), not absolute;
+  `toAbsolutePath` prepends `/storage/emulated/0/`.
+- The host also whitelists paths: `SecurityException: ... not allowed to access sdcard path outside
+  whitelist`. Files synced from the Supernote cloud live under
+  `Android/data/com.ratta.supernote.serverlink/files/sync/...` and **cannot be read** by a plugin;
+  those entries can only use the filename (truncated by the sync, e.g. "Concrete Mathematics_ A
+  Foundation for Com - ..."), and some have no author at all.
+- The read permission dialog offers "Allow This Time Only" / "Always Allow": with the former the
+  prompt returns on every launch.
+
+**Still to do**
+- Wire it in: `listDigestEntriesBySourceType(1)` exists (returns `sourcePath`, `sourcePage`,
+  `comment`); export those with `title`/`author` from `resolveDocumentInfo`, `category: 'books'`,
+  `location`/`location_type: 'page'` from `sourcePage`, `note` from `comment`, and key
+  `exported_digest_entries` by row id as now. Loop prevention is unaffected.
+- Decide behaviour when a file is unreadable (permission denied / sync folder): export under the
+  filename guess, or skip and tell the user? A guess that later upgrades to the real title would
+  create duplicates on Readwise -- probably skip unless the user opts in.
+- Notes (`source_type = 2`): title = the `.note` file name, page from `metadata.note_page`; needs
+  its own toggle, and a decision on whether handwriting recognition text belongs in Readwise.
+- XMP metadata for PDFs whose Info dictionary is empty (2 of 12 sampled).
+- UI: a toggle and pending count next to the existing export, plus a place to explain the read
+  permission before the OS prompt appears.
 
 ### 2. Known limitations (not scheduled)
 

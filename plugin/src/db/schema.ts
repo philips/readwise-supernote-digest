@@ -61,12 +61,29 @@ export const CREATE_EXPORTED_DIGEST_ENTRIES_TABLE = `
   );
 `;
 
+/** Title/author resolved for a document (Digest "Documents" entry source_path). Cached so a
+ * document keeps exporting under one stable title -- see src/lib/documentInfo/resolve.ts. */
+export const CREATE_DOCUMENT_INFO_TABLE = `
+  CREATE TABLE IF NOT EXISTS document_info (
+    source_path TEXT PRIMARY KEY NOT NULL,
+    title TEXT NOT NULL,
+    author TEXT,
+    title_source TEXT NOT NULL,
+    author_source TEXT,
+    format TEXT,
+    file_size INTEGER,
+    file_mtime INTEGER,
+    resolved_at TEXT NOT NULL
+  );
+`;
+
 export const SCHEMA_STATEMENTS: string[] = [
   CREATE_SETTINGS_TABLE,
   CREATE_HIGHLIGHTS_TABLE,
   CREATE_HIGHLIGHTS_UPDATED_INDEX,
   CREATE_HIGHLIGHTS_BOOK_INDEX,
   CREATE_EXPORTED_DIGEST_ENTRIES_TABLE,
+  CREATE_DOCUMENT_INFO_TABLE,
 ];
 
 /** Known `settings` table keys, centralized so callers don't hand-roll strings. */

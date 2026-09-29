@@ -2,6 +2,7 @@ import {PluginManager} from 'sn-plugin-lib';
 
 const INTERNET_PERMISSION = 'plugin.permission.INTERNET';
 const FILE_WRITE_PERMISSION = 'plugin.permission.FILE:WRITE';
+const FILE_READ_PERMISSION = 'plugin.permission.FILE:READ';
 
 /**
  * Ensures the plugin has the INTERNET permission before the first network call in a session.
@@ -38,6 +39,22 @@ export async function ensureFileWritePermission(): Promise<boolean> {
   const result = await PluginManager.requestPermission(
     FILE_WRITE_PERMISSION,
     'Readwise Digest needs file write access to insert a quote into the current note.',
+  );
+  return result === 1 || result === 2;
+}
+
+/**
+ * Reading a document's title/author out of the PDF/EPUB itself (src/lib/documentInfo). The host
+ * enforces this in native code too, not just for SDK calls: without it our own
+ * DocumentMetadataModule gets `SecurityException: Plugin [...] has no READ permission on sdcard`.
+ */
+export async function ensureFileReadPermission(): Promise<boolean> {
+  const has = await PluginManager.hasPermission(FILE_READ_PERMISSION);
+  if (has === 1) {return true;}
+
+  const result = await PluginManager.requestPermission(
+    FILE_READ_PERMISSION,
+    'Readwise Digest needs file read access to look up the title and author of the books you highlighted.',
   );
   return result === 1 || result === 2;
 }

@@ -139,5 +139,8 @@ Covered edge cases: the Digest -> Readwise -> Digest duplicate loop (`loop.test.
 filtering incl. an empty category cache and partial batch failures (`digestExport.test.ts`), our
 own exports never re-entering Digest and resumable syncs (`digestSync.test.ts`), deletion handling
 and pagination (`readwiseSync.test.ts`), and the SQL rules themselves (`db.test.ts`).
+Native PDF/EPUB parsing has its own JVM tests: `cd plugin/android && ./gradlew :app:testDebugUnitTest`
+(needs the JDK 21 from the setup section).
+
 When touching loop prevention, sanity-check the tests by temporarily breaking the code: each of
 the rules above has at least one test that fails without it.

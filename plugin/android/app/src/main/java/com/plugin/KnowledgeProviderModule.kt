@@ -175,36 +175,55 @@ class KnowledgeProviderModule(reactContext: ReactApplicationContext) :
    * safe -- do not change this to build the selection string from any external input.
    */
   @ReactMethod
-  fun queryManualEntries(promise: Promise) {
+  fun queryManualEntries(promise: Promise) = queryBySourceType(SOURCE_TYPE_SELF_ADD, promise)
+
+  /**
+   * Same query for the other buckets: 1 = Documents (highlights made while reading a PDF/EPUB),
+   * 2 = Notes (from a handwritten note). Rows additionally carry `sourcePath`/`sourcePage`, which
+   * is where the JS side finds the file to read a title and author from. `sourceType` is an Int
+   * from a fixed allow-list, never spliced in from arbitrary input (the selection is raw SQL --
+   * see the note on queryManualEntries).
+   */
+  @ReactMethod
+  fun queryEntriesBySourceType(sourceType: Int, promise: Promise) {
+    if (sourceType !in 1..4) {
+      promise.reject("KNOWLEDGE_BAD_SOURCE_TYPE", "source_type must be 1..4, got $sourceType")
+      return
+    }
+    queryBySourceType(sourceType, promise)
+  }
+
+  private fun queryBySourceType(sourceType: Int, promise: Promise) {
     try {
       val results: WritableArray = Arguments.createArray()
       reactApplicationContext.contentResolver
           .query(
               Uri.withAppendedPath(BASE_URI, "knowledge"),
               null,
-              "source_type = $SOURCE_TYPE_SELF_ADD",
+              "source_type = $sourceType",
               null,
               null,
           )
           ?.use { cursor ->
-            val idCol = cursor.getColumnIndex("id")
-            val contentCol = cursor.getColumnIndex("content")
-            val categoryCol = cursor.getColumnIndex("knowledge_base_unique_attribute")
-            val metadataCol = cursor.getColumnIndex("metadata")
-            val creationTimeCol = cursor.getColumnIndex("creation_time")
+            fun str(name: String): String? {
+              val i = cursor.getColumnIndex(name)
+              return if (i >= 0) cursor.getString(i) else null
+            }
+            fun num(name: String): Double {
+              val i = cursor.getColumnIndex(name)
+              return if (i >= 0) cursor.getLong(i).toDouble() else 0.0
+            }
             while (cursor.moveToNext()) {
               val row: WritableMap = Arguments.createMap()
-              row.putDouble("id", if (idCol >= 0) cursor.getLong(idCol).toDouble() else 0.0)
-              row.putString("content", if (contentCol >= 0) cursor.getString(contentCol) else null)
-              row.putString(
-                  "categoryUniqueAttribute",
-                  if (categoryCol >= 0) cursor.getString(categoryCol) else null,
-              )
-              row.putString("metadata", if (metadataCol >= 0) cursor.getString(metadataCol) else null)
-              row.putDouble(
-                  "creationTime",
-                  if (creationTimeCol >= 0) cursor.getLong(creationTimeCol).toDouble() else 0.0,
-              )
+              row.putDouble("id", num("id"))
+              row.putString("content", str("content"))
+              row.putString("categoryUniqueAttribute", str("knowledge_base_unique_attribute"))
+              row.putString("metadata", str("metadata"))
+              row.putDouble("creationTime", num("creation_time"))
+              row.putInt("sourceType", sourceType)
+              row.putString("sourcePath", str("source_path"))
+              row.putString("sourcePage", str("source_page"))
+              row.putString("comment", str("comment_str"))
               results.pushMap(row)
             }
           }

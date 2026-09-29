@@ -3,6 +3,7 @@ import PluginConfigJson from '../../PluginConfig.json';
 import {SCHEMA_STATEMENTS, SettingsKey} from './schema';
 import type {LocalHighlightRow} from '../readwise/types';
 import {SUPERNOTE_EXPORT_TITLE} from '../readwise/constants';
+import type {DocumentInfo} from '../lib/documentInfo/resolve';
 
 SQLite.enablePromise(false); // we use the callback API and wrap it ourselves below
 
@@ -282,8 +283,62 @@ export async function markDigestEntryExported(
   );
 }
 
+// ---------------------------------------------------------------------------
+// document_info (title/author cache for Documents-bucket Digest entries)
+// ---------------------------------------------------------------------------
+
+export interface CachedDocumentInfo {
+  info: DocumentInfo;
+  file_size: number | null;
+  file_mtime: number | null;
+}
+
+export async function getDocumentInfoCache(
+  sourcePath: string,
+): Promise<CachedDocumentInfo | null> {
+  const {rows} = await runSQL('SELECT * FROM document_info WHERE source_path = ?', [sourcePath]);
+  if (rows.length === 0) {return null;}
+  const r = rows[0];
+  return {
+    info: {
+      title: r.title,
+      author: r.author ?? null,
+      titleSource: r.title_source,
+      authorSource: r.author_source ?? null,
+      format: r.format ?? null,
+    },
+    file_size: r.file_size ?? null,
+    file_mtime: r.file_mtime ?? null,
+  };
+}
+
+export async function putDocumentInfoCache(
+  sourcePath: string,
+  info: DocumentInfo,
+  fileSize: number | null,
+  fileMtime: number | null,
+): Promise<void> {
+  await runSQL(
+    `INSERT OR REPLACE INTO document_info
+       (source_path, title, author, title_source, author_source, format, file_size, file_mtime, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      sourcePath,
+      info.title,
+      info.author,
+      info.titleSource,
+      info.authorSource,
+      info.format,
+      fileSize,
+      fileMtime,
+      new Date().toISOString(),
+    ],
+  );
+}
+
 export async function clearAllData(): Promise<void> {
   await runSQL('DELETE FROM highlights');
   await runSQL('DELETE FROM settings');
   await runSQL('DELETE FROM exported_digest_entries');
+  await runSQL('DELETE FROM document_info');
 }
