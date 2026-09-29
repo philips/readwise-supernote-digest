@@ -1,10 +1,13 @@
 # readwise-supernote-digest
 
 A Supernote plugin that syncs [Readwise](https://readwise.io) highlights to and from your
-Supernote — cache your highlights on-device, insert any quote into the note you're working on,
-and mirror them into Supernote's native Digest app (with a two-way bridge back to Readwise).
+Supernote.
 
-## Features
+* cache your highlights on-device
+* insert Readwise quotes into the note
+* mirror Readwise quotes into Supernote's native Digest app
+
+## Walk Through
 
 ### Connect your Readwise account and cache highlights on-device
 
@@ -21,9 +24,7 @@ book, or author, and insert one as a real textbox directly onto the current page
 
 <img src="docs/screenshots/03-insert-quote-picker.png" width="360" alt="Insert a Quote tab with search">
 
-The result is a normal textbox on the page — resizable/movable like anything else in NOTE:
-
-<img src="docs/screenshots/04-note-with-quote.png" width="360" alt="Note page with an inserted Readwise quote">
+The result is a normal textbox on the page — resizable/movable like anything else in a note.
 
 ### Sync and Export tab
 
@@ -31,7 +32,7 @@ Highlight count, manual "Sync now", and toggles for the two Digest integrations 
 
 <img src="docs/screenshots/02-home.png" width="360" alt="Sync and Export tab">
 
-### Real integration with Supernote's native Digest app
+### Integrate with Supernote's Digest app
 
 Highlights get synced into the actual on-device Digest app (Settings/NOTE sidebar → Digest),
 not a lookalike — tagged with a `Readwise` category so they're easy to filter, alongside anything
