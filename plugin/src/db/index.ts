@@ -2,6 +2,7 @@ import SQLite from 'react-native-sqlite-storage';
 import PluginConfigJson from '../../PluginConfig.json';
 import {SCHEMA_STATEMENTS, SettingsKey} from './schema';
 import type {LocalHighlightRow} from '../readwise/types';
+import {SUPERNOTE_EXPORT_TITLE} from '../readwise/constants';
 
 SQLite.enablePromise(false); // we use the callback API and wrap it ourselves below
 
@@ -92,6 +93,8 @@ export function initDatabase(): Promise<void> {
       for (const statement of SCHEMA_STATEMENTS) {
         await runSQL(statement);
       }
+      // Also covers rows cached before this rule existed.
+      await markOwnExportsSyncedToDigest();
     })();
   }
   return initPromise;
@@ -174,6 +177,21 @@ export async function upsertHighlights(highlights: LocalHighlightRow[]): Promise
     ],
   }));
   await runInTransaction(statements);
+  await markOwnExportsSyncedToDigest();
+}
+
+/**
+ * Highlights we exported to Readwise ourselves (Digest -> Readwise) come back down on the next
+ * import sync as ordinary highlights. They originated in Digest, so pushing them back into Digest
+ * (Readwise -> Digest) would create a duplicate of the user's own entry. Mark them as already
+ * synced so digestSync skips them.
+ */
+async function markOwnExportsSyncedToDigest(): Promise<void> {
+  await runSQL(
+    `UPDATE highlights SET synced_to_digest_at = fetched_at
+     WHERE book_title = ? AND synced_to_digest_at IS NULL`,
+    [SUPERNOTE_EXPORT_TITLE],
+  );
 }
 
 export async function getHighlightCount(): Promise<number> {
@@ -240,6 +258,28 @@ export async function getUnsyncedToDigestCount(): Promise<number> {
     'SELECT COUNT(*) as count FROM highlights WHERE is_deleted = 0 AND synced_to_digest_at IS NULL',
   );
   return rows.length > 0 ? Number(rows[0].count) : 0;
+}
+
+// ---------------------------------------------------------------------------
+// exported_digest_entries (Task 4: Digest -> Readwise export bookkeeping)
+// ---------------------------------------------------------------------------
+
+/** Every `local_key` (Digest entry id, stringified) already exported to Readwise, as a Set for
+ * fast membership checks against a freshly-queried Digest entry list. */
+export async function getExportedDigestEntryKeys(): Promise<Set<string>> {
+  const {rows} = await runSQL('SELECT local_key FROM exported_digest_entries');
+  return new Set(rows.map(r => String(r.local_key)));
+}
+
+export async function markDigestEntryExported(
+  localKey: string,
+  exportedAt: string,
+  readwiseHighlightId?: number | null,
+): Promise<void> {
+  await runSQL(
+    'INSERT OR REPLACE INTO exported_digest_entries (local_key, readwise_highlight_id, exported_at) VALUES (?, ?, ?)',
+    [localKey, readwiseHighlightId ?? null, exportedAt],
+  );
 }
 
 export async function clearAllData(): Promise<void> {

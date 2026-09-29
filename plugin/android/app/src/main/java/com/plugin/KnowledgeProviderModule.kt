@@ -3,10 +3,13 @@ package com.plugin
 import android.content.ContentUris
 import android.content.ContentValues
 import android.net.Uri
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.WritableArray
+import com.facebook.react.bridge.WritableMap
 
 /**
  * Direct integration with Supernote's native Digest feature, via the
@@ -86,6 +89,16 @@ class KnowledgeProviderModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Read-only variant of getOrCreateCategory: resolves null if the category doesn't exist. */
+  @ReactMethod
+  fun findCategory(name: String, promise: Promise) {
+    try {
+      promise.resolve(queryCategoryUniqueAttributeByName(name))
+    } catch (e: Exception) {
+      promise.reject("KNOWLEDGE_BASE_ERROR", e.message, e)
+    }
+  }
+
   private fun queryCategoryUniqueAttributeByName(name: String): String? {
     val uri = Uri.withAppendedPath(BASE_URI, "knowledge_base/by_name")
     reactApplicationContext.contentResolver.query(uri, null, null, arrayOf(name), null)?.use {
@@ -145,6 +158,59 @@ class KnowledgeProviderModule(reactContext: ReactApplicationContext) :
       promise.resolve(ContentUris.parseId(insertedUri).toDouble())
     } catch (e: Exception) {
       promise.reject("KNOWLEDGE_INSERT_ERROR", e.message, e)
+    }
+  }
+
+  /**
+   * Lists all "Manual Entry" (source_type=4/SELF_ADD) Digest entries -- the bucket this module's
+   * own `insertEntry` writes into, which is also where a user's own hand-typed Digest quotes
+   * live (there's no other source_type a plugin can honestly use -- see docs/KNOWLEDGE_PROVIDER.md).
+   * Used by Task 4 (export digest entries back to Readwise); the
+   * Readwise-category filtering happens in JS (src/lib/digestSync.ts), not here.
+   *
+   * Queries the bare `knowledge` dir URI with a `selection` string -- see
+   * docs/KNOWLEDGE_PROVIDER.md "Listing/filtering entries" for why this has to be a raw SQL
+   * fragment (the provider does not apply `selectionArgs` as bind params on this particular
+   * path). `SOURCE_TYPE_SELF_ADD` is a hardcoded int constant here, not user input, so this is
+   * safe -- do not change this to build the selection string from any external input.
+   */
+  @ReactMethod
+  fun queryManualEntries(promise: Promise) {
+    try {
+      val results: WritableArray = Arguments.createArray()
+      reactApplicationContext.contentResolver
+          .query(
+              Uri.withAppendedPath(BASE_URI, "knowledge"),
+              null,
+              "source_type = $SOURCE_TYPE_SELF_ADD",
+              null,
+              null,
+          )
+          ?.use { cursor ->
+            val idCol = cursor.getColumnIndex("id")
+            val contentCol = cursor.getColumnIndex("content")
+            val categoryCol = cursor.getColumnIndex("knowledge_base_unique_attribute")
+            val metadataCol = cursor.getColumnIndex("metadata")
+            val creationTimeCol = cursor.getColumnIndex("creation_time")
+            while (cursor.moveToNext()) {
+              val row: WritableMap = Arguments.createMap()
+              row.putDouble("id", if (idCol >= 0) cursor.getLong(idCol).toDouble() else 0.0)
+              row.putString("content", if (contentCol >= 0) cursor.getString(contentCol) else null)
+              row.putString(
+                  "categoryUniqueAttribute",
+                  if (categoryCol >= 0) cursor.getString(categoryCol) else null,
+              )
+              row.putString("metadata", if (metadataCol >= 0) cursor.getString(metadataCol) else null)
+              row.putDouble(
+                  "creationTime",
+                  if (creationTimeCol >= 0) cursor.getLong(creationTimeCol).toDouble() else 0.0,
+              )
+              results.pushMap(row)
+            }
+          }
+      promise.resolve(results)
+    } catch (e: Exception) {
+      promise.reject("KNOWLEDGE_QUERY_ERROR", e.message, e)
     }
   }
 }

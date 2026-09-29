@@ -2,9 +2,9 @@ import {NativeModules} from 'react-native';
 
 /**
  * Thin wrapper around the KnowledgeProviderModule native module -- direct integration with
- * Supernote's native Digest feature. See that Kotlin module's doc comment (and
- * plans/plan.md "Task 3") for the full story on why/how this works despite not being part of
- * the documented sn-plugin-lib SDK surface.
+ * Supernote's native Digest feature. See docs/KNOWLEDGE_PROVIDER.md for the full URI/schema
+ * reference, and plans/plan.md "Task 3" for how/why this works despite not being part of the
+ * documented sn-plugin-lib SDK surface.
  */
 
 function getNativeModule() {
@@ -24,6 +24,11 @@ export async function getOrCreateDigestCategory(name: string): Promise<string> {
   return getNativeModule().getOrCreateCategory(name);
 }
 
+/** Like getOrCreateDigestCategory but read-only: resolves null if no such category exists. */
+export async function findDigestCategory(name: string): Promise<string | null> {
+  return getNativeModule().findCategory(name);
+}
+
 export interface DigestEntryInput {
   content: string;
   categoryUniqueAttribute?: string | null;
@@ -38,4 +43,21 @@ export async function insertDigestEntry(entry: DigestEntryInput): Promise<void> 
     entry.categoryUniqueAttribute ?? null,
     metadataJson,
   );
+}
+
+export interface ManualDigestEntry {
+  id: number;
+  content: string | null;
+  categoryUniqueAttribute: string | null;
+  /** Flat JSON object string, e.g. `{"author":"..."}` -- not parsed here, see
+   * docs/KNOWLEDGE_PROVIDER.md "metadata" for the known keys. */
+  metadata: string | null;
+  creationTime: number;
+}
+
+/** Lists every "Manual Entry" (source_type=4) Digest entry -- both the ones this plugin created
+ * (Task 3) and any the user typed by hand via the native "+" button. Task 4 filters out our own
+ * Readwise-tagged ones client-side (see src/lib/digestSync.ts) before exporting the rest. */
+export async function listManualDigestEntries(): Promise<ManualDigestEntry[]> {
+  return getNativeModule().queryManualEntries();
 }
