@@ -61,9 +61,11 @@ See [`plans/plan.md`](plans/plan.md) for the full task-by-task design/implementa
 
 ## Known gaps
 
-Only Manual Entry Digest entries are exported to Readwise so far. Exporting **Documents** highlights
-is in progress: reading title and author from PDFs and EPUBs is implemented and tested, but not yet
-wired into the export. See "Open issues" in [`plans/plan.md`](plans/plan.md).
+Digest exports cover Manual Entries and highlights from **Documents** (PDF/EPUB), filed on Readwise
+under the book's real title and author read from the file. Two limits: highlights in files the plugin
+can't read (the Supernote cloud-sync folder, [#1](https://github.com/philips/readwise-supernote-digest/issues/1))
+use the file name instead, and **Notes** highlights aren't exported yet. See "Open issues" in
+[`plans/plan.md`](plans/plan.md).
 
 ## Device
 

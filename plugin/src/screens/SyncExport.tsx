@@ -20,12 +20,28 @@ import {
   exportPendingDigestEntries,
   getPendingDigestExportCount,
   type DigestExportProgress,
+  type DigestExportResult,
 } from '../lib/digestExport';
 import {ensureInternetPermission} from '../lib/permissions';
 import {Color, FontSize} from '../theme';
 
 interface Props {
   onSignOut: () => void;
+}
+
+function summarizeExport(result: DigestExportResult): string | null {
+  if (result.exported === 0) {return null;}
+  const parts = [`Exported ${result.exported} ${result.exported === 1 ? 'entry' : 'entries'}`];
+  if (result.documents > 0) {
+    parts.push(`${result.documents} from books`);
+  }
+  let text = parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(', ')}).` : `${parts[0]}.`;
+  if (result.usedFilename > 0) {
+    text +=
+      ` ${result.usedFilename} book ${result.usedFilename === 1 ? 'highlight was' : 'highlights were'}` +
+      " filed under the file name because the book's title and author couldn't be read.";
+  }
+  return text;
 }
 
 /** Tab content ("Sync and Export") -- highlight cache status plus the two Digest bridges.
@@ -47,6 +63,7 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<DigestExportProgress | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSummary, setExportSummary] = useState<string | null>(null);
 
   const refreshCount = useCallback(async () => {
     setCount(await getHighlightCount());
@@ -84,10 +101,12 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
 
   const handleExport = async () => {
     setExportError(null);
+    setExportSummary(null);
     setExporting(true);
     setExportProgress(null);
     try {
-      await exportPendingDigestEntries(setExportProgress);
+      const result = await exportPendingDigestEntries(setExportProgress);
+      setExportSummary(summarizeExport(result));
       await refreshExportPendingCount();
     } catch (err) {
       setExportError(err instanceof Error ? err.message : 'Export to Readwise failed.');
@@ -233,7 +252,13 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
               : `${exportPendingCount} Digest ${exportPendingCount === 1 ? 'entry' : 'entries'} not yet on Readwise.`}
         </Text>
 
+        <Text style={styles.subtext}>
+          Includes highlights from books. Their title and author are read from the file, which needs
+          file access; without it the file name is used.
+        </Text>
+
         {exportError ? <Text style={styles.error}>{exportError}</Text> : null}
+        {exportSummary ? <Text style={styles.subtext}>{exportSummary}</Text> : null}
 
         <TouchableOpacity
           style={[styles.secondaryButton, exporting && styles.buttonDisabled]}

@@ -4,12 +4,17 @@
  * prompts) replaced by controllable fakes. Everything else -- db/, digestSync, digestExport,
  * readwise/sync -- is the real code.
  */
-import type {ManualDigestEntry} from '../../src/lib/knowledgeProvider';
+import type {DigestEntry, ManualDigestEntry} from '../../src/lib/knowledgeProvider';
 import type {LocalHighlightRow} from '../../src/readwise/types';
 
 export interface Fakes {
   /** What the Digest app currently contains (source_type=4 entries). */
   digestEntries: ManualDigestEntry[];
+  /** What the Digest app holds in its Documents bucket (source_type=1). */
+  documentEntries: DigestEntry[];
+  /** Native DocumentMetadata.readMetadata: default answers "file does not exist". */
+  readDocumentMetadata: jest.Mock;
+  ensureFileReadPermission: jest.Mock;
   /** Category name -> unique_attribute that findDigestCategory can see. */
   categories: Record<string, string>;
   createHighlights: jest.Mock;
@@ -27,6 +32,9 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
 
   const fakes: Fakes = {
     digestEntries: [],
+    documentEntries: [],
+    readDocumentMetadata: jest.fn(async () => ({exists: false})),
+    ensureFileReadPermission: jest.fn(async () => true),
     categories: {},
     createHighlights: jest.fn(async () => []),
     insertDigestEntry: jest.fn(async () => undefined),
@@ -39,7 +47,11 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
   };
 
   jest.doMock('../../src/lib/knowledgeProvider', () => ({
+    DigestSourceType: {Document: 1, Note: 2, ManualEntry: 4},
     listManualDigestEntries: jest.fn(async () => fakes.digestEntries),
+    listDigestEntriesBySourceType: jest.fn(async (type: number) =>
+      type === 1 ? fakes.documentEntries : [],
+    ),
     findDigestCategory: fakes.findDigestCategory,
     getOrCreateDigestCategory: fakes.getOrCreateDigestCategory,
     insertDigestEntry: fakes.insertDigestEntry,
@@ -47,6 +59,10 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
   jest.doMock('../../src/lib/permissions', () => ({
     ensureInternetPermission: jest.fn(async () => true),
     ensureFileWritePermission: jest.fn(async () => true),
+    ensureFileReadPermission: (...args: unknown[]) => fakes.ensureFileReadPermission(...args),
+  }));
+  jest.doMock('../../src/lib/documentInfo/nativeBridge', () => ({
+    readDocumentMetadata: (...args: unknown[]) => fakes.readDocumentMetadata(...args),
   }));
   jest.doMock('../../src/readwise/client', () => {
     class ReadwiseRateLimitError extends Error {
@@ -66,11 +82,23 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
   const schema = require('../../src/db/schema');
   const constants = require('../../src/readwise/constants');
   const types = require('../../src/readwise/types');
+  const documentResolve = require('../../src/lib/documentInfo/resolve');
 
   await db.initDatabase();
   await db.setSetting(schema.SettingsKey.ReadwiseApiToken, 'test-token');
 
-  return {fakes, db, digestExport, digestSync, sync, schema, constants, types};
+  return {
+    fakes,
+    db,
+    digestExport,
+    digestSync,
+    sync,
+    schema,
+    constants,
+    types,
+    documentResolve,
+    resolveDocumentInfo: documentResolve.resolveDocumentInfo,
+  };
 }
 
 let nextId = 1000;
@@ -109,6 +137,24 @@ export function digestEntry(overrides: Partial<ManualDigestEntry> = {}): ManualD
     categoryUniqueAttribute: null,
     metadata: null,
     creationTime: Date.UTC(2026, 0, 1),
+    ...overrides,
+  };
+}
+
+let nextDocEntryId = 5000;
+
+/** A Digest "Documents" entry (a highlight made while reading a PDF/EPUB). */
+export function documentEntry(overrides: Partial<DigestEntry> = {}): DigestEntry {
+  return {
+    id: nextDocEntryId++,
+    content: 'a highlighted passage',
+    categoryUniqueAttribute: null,
+    metadata: null,
+    creationTime: Date.UTC(2026, 0, 1),
+    sourceType: 1,
+    sourcePath: 'Document/Some Book - Filename Author.pdf',
+    sourcePage: '12',
+    comment: null,
     ...overrides,
   };
 }

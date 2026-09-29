@@ -2,7 +2,8 @@ import SQLite from 'react-native-sqlite-storage';
 import PluginConfigJson from '../../PluginConfig.json';
 import {SCHEMA_STATEMENTS, SettingsKey} from './schema';
 import type {LocalHighlightRow} from '../readwise/types';
-import {SUPERNOTE_EXPORT_TITLE} from '../readwise/constants';
+import {SUPERNOTE_EXPORT_SOURCE_TYPE, SUPERNOTE_EXPORT_TITLE} from '../readwise/constants';
+import {textKey} from '../lib/textKey';
 import type {DocumentInfo} from '../lib/documentInfo/resolve';
 
 SQLite.enablePromise(false); // we use the callback API and wrap it ourselves below
@@ -178,21 +179,67 @@ export async function upsertHighlights(highlights: LocalHighlightRow[]): Promise
     ],
   }));
   await runInTransaction(statements);
-  await markOwnExportsSyncedToDigest();
+  await markOwnExportsSyncedToDigest(highlights);
 }
 
 /**
  * Highlights we exported to Readwise ourselves (Digest -> Readwise) come back down on the next
  * import sync as ordinary highlights. They originated in Digest, so pushing them back into Digest
  * (Readwise -> Digest) would create a duplicate of the user's own entry. Mark them as already
- * synced so digestSync skips them.
+ * synced so digestSync skips them. Three independent signals, any one is enough:
+ *
+ *  - book title "Supernote Digest" (hand-typed Manual Entries are exported under it);
+ *  - `source` = our source_type (Readwise records what we posted);
+ *  - the text matches something we exported (Documents entries are exported under their real book
+ *    title, and if the book already exists on Readwise the highlight may land in it under that
+ *    book's own source -- the text is the only thing that still identifies it).
+ *
+ * With `candidates` (the batch just upserted) only those rows are text-checked, which keeps a
+ * first full sync of thousands of highlights cheap; without it (app start) every still-pending row
+ * is checked, which also repairs rows cached before a rule existed.
  */
-async function markOwnExportsSyncedToDigest(): Promise<void> {
+async function markOwnExportsSyncedToDigest(candidates?: LocalHighlightRow[]): Promise<void> {
   await runSQL(
     `UPDATE highlights SET synced_to_digest_at = fetched_at
-     WHERE book_title = ? AND synced_to_digest_at IS NULL`,
-    [SUPERNOTE_EXPORT_TITLE],
+     WHERE synced_to_digest_at IS NULL AND (book_title = ? OR source = ?)`,
+    [SUPERNOTE_EXPORT_TITLE, SUPERNOTE_EXPORT_SOURCE_TYPE],
   );
+
+  const keys = await getExportedTextKeys();
+  if (keys.size === 0) {return;}
+
+  let rows: Array<{readwise_id: number; text: string}>;
+  if (candidates) {
+    rows = candidates.map(c => ({readwise_id: c.readwise_id, text: c.text}));
+  } else {
+    const res = await runSQL(
+      'SELECT readwise_id, text FROM highlights WHERE synced_to_digest_at IS NULL AND is_deleted = 0',
+    );
+    rows = res.rows;
+  }
+  const ids = rows.filter(r => keys.has(textKey(r.text))).map(r => r.readwise_id);
+
+  const CHUNK = 500; // SQLite's default bound-variable limit is 999
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    await runSQL(
+      `UPDATE highlights SET synced_to_digest_at = fetched_at
+       WHERE synced_to_digest_at IS NULL AND readwise_id IN (${chunk.map(() => '?').join(',')})`,
+      chunk,
+    );
+  }
+}
+
+/** Remember the text of an entry we just exported (see markOwnExportsSyncedToDigest). */
+export async function markTextExported(text: string): Promise<void> {
+  const key = textKey(text);
+  if (!key) {return;}
+  await runSQL('INSERT OR IGNORE INTO exported_text_keys (text_key) VALUES (?)', [key]);
+}
+
+async function getExportedTextKeys(): Promise<Set<string>> {
+  const {rows} = await runSQL('SELECT text_key FROM exported_text_keys');
+  return new Set(rows.map(r => String(r.text_key)));
 }
 
 export async function getHighlightCount(): Promise<number> {
@@ -341,4 +388,5 @@ export async function clearAllData(): Promise<void> {
   await runSQL('DELETE FROM settings');
   await runSQL('DELETE FROM exported_digest_entries');
   await runSQL('DELETE FROM document_info');
+  await runSQL('DELETE FROM exported_text_keys');
 }

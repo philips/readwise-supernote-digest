@@ -4,13 +4,8 @@ const PATH = '/storage/emulated/0/Document/Some Book - Filename Author.pdf';
 
 async function setup() {
   const env = await loadEnv();
-  const native = {
-    readDocumentMetadata: jest.fn(),
-  };
-  native.readDocumentMetadata.mockResolvedValue({exists: true, size: 100, mtime: 5});
-  jest.doMock('../src/lib/documentInfo/nativeBridge', () => native);
-  const {resolveDocumentInfo} = require('../src/lib/documentInfo/resolve');
-  return {...env, native, resolveDocumentInfo};
+  env.fakes.readDocumentMetadata.mockResolvedValue({exists: true, size: 100, mtime: 5});
+  return {...env, native: {readDocumentMetadata: env.fakes.readDocumentMetadata}};
 }
 
 describe('resolveDocumentInfo: source priority', () => {
@@ -83,10 +78,8 @@ describe('resolveDocumentInfo: paths', () => {
   });
 
   test('cloud-sync paths resolve too, absolute paths are left alone', async () => {
-    const {native, resolveDocumentInfo, toAbsolutePath} = await setup().then(e => ({
-      ...e,
-      toAbsolutePath: require('../src/lib/documentInfo/resolve').toAbsolutePath,
-    }));
+    const {native, resolveDocumentInfo, documentResolve} = await setup();
+    const toAbsolutePath = documentResolve.toAbsolutePath;
     await resolveDocumentInfo('Android/data/com.ratta.supernote.serverlink/files/sync/2/books/X.pdf');
     expect(native.readDocumentMetadata).toHaveBeenCalledWith(
       '/storage/emulated/0/Android/data/com.ratta.supernote.serverlink/files/sync/2/books/X.pdf',
@@ -180,16 +173,11 @@ describe('resolveDocumentInfo: cache stability', () => {
     const first = await setup();
     await first.resolveDocumentInfo(PATH);
 
-    const second = await (async () => {
-      const env = await loadEnv({keepDatabase: true});
-      const native = {readDocumentMetadata: jest.fn()};
-      jest.doMock('../src/lib/documentInfo/nativeBridge', () => native);
-      return {env, native, resolve: require('../src/lib/documentInfo/resolve').resolveDocumentInfo};
-    })();
-    expect((await second.resolve(PATH)).title).toBe('Some Book');
-    expect(second.native.readDocumentMetadata).not.toHaveBeenCalled();
+    const second = await loadEnv({keepDatabase: true});
+    expect((await second.resolveDocumentInfo(PATH)).title).toBe('Some Book');
+    expect(second.fakes.readDocumentMetadata).not.toHaveBeenCalled();
 
-    await second.env.db.clearAllData();
-    expect(await second.env.db.getDocumentInfoCache(PATH)).toBeNull();
+    await second.db.clearAllData();
+    expect(await second.db.getDocumentInfoCache(PATH)).toBeNull();
   });
 });

@@ -224,7 +224,7 @@ Resolved this round (see "Round 3 fixes" at the end of this file): duplicate re-
 Setup screenshot, leftover test entry, deleted highlights lingering in the local cache, and an
 empty-cache hole in export loop-prevention. Still open:
 
-### 1. Export Documents and Notes highlights to Readwise -- extraction done, export not wired yet
+### 1. Export Documents and Notes highlights to Readwise -- Documents done, Notes open
 
 Task 4 only exports the **Manual Entry** tab (`source_type = 4`). Highlights made while reading
 PDFs/EPUBs (**Documents**, `source_type = 1`) or saved from handwritten notes (**Notes**,
@@ -265,20 +265,41 @@ source_url, so the title must come from the file and must be **stable** across r
 - The read permission dialog offers "Allow This Time Only" / "Always Allow": with the former the
   prompt returns on every launch.
 
+**Done: Documents export wired in** (`src/lib/digestExport.ts`)
+- The existing "Export Digest to Readwise" toggle/button now covers Manual Entries *and* the
+  Documents bucket (`listDigestEntriesBySourceType(1)`). Book highlights go out with the resolved
+  `title`/`author`, `category: 'books'`, `location` + `location_type: 'page'` from `source_page`
+  (only when it is a positive integer) and `note` from the Digest comment.
+- Missing/unreadable metadata: exported under the filename-derived title (decision; see
+  https://github.com/philips/readwise-supernote-digest/issues/1). Declining the file-access prompt,
+  a throwing prompt or native module, and a missing file all degrade to that instead of aborting.
+  The result summary tells the user how many highlights used the filename.
+- File access is only requested when a book highlight is actually pending, and counting pending
+  entries never reads files.
+- **Loop prevention had to grow.** An exported book highlight returns from Readwise under its
+  *real* title, so the "Supernote Digest" title rule no longer catches it, and with "Sync into
+  Digest" on it would be pushed back into Digest as a Readwise-category duplicate. Now three signals
+  mark a re-imported highlight as already in Digest: title "Supernote Digest", `source` =
+  `supernote_digest`, and its (whitespace-normalised) text matching something we exported
+  (`exported_text_keys`; needed because a highlight can land in a pre-existing book from another
+  source). Upserts text-check only their own batch (a first sync of thousands stays cheap); older
+  pending rows are repaired at app start.
+- Verified on the device: 5 pending -> exported (2 under filenames: the serverlink files) -> Sync
+  now pulled them back (cache 6473 -> 6478) -> "Digest is up to date", native Digest unchanged
+  (Documents 5, Manual Entry 6473). 45 new jest tests, mutation-checked (two initially weak tests
+  were found this way and rewritten).
+
+**Known rough edges**
+- Titles are cached and never change, and Readwise de-dupes on title + author: whatever was first
+  exported stays. Winnie-the-Pooh's EPUB lists its illustrator first without a role attribute, so it
+  was exported with author "Ernest H. Shepard, A. A. Milne". Fixing that means editing the book on
+  Readwise; the plugin will not rename it.
+- Highlights in the serverlink folder use the truncated filename title (issue #1).
+
 **Still to do**
-- Wire it in: `listDigestEntriesBySourceType(1)` exists (returns `sourcePath`, `sourcePage`,
-  `comment`); export those with `title`/`author` from `resolveDocumentInfo`, `category: 'books'`,
-  `location`/`location_type: 'page'` from `sourcePage`, `note` from `comment`, and key
-  `exported_digest_entries` by row id as now. Loop prevention is unaffected.
-- Unreadable or metadata-less files: **decided** -- export under the filename-derived title (and
-  author, if the name has one) rather than skipping. The serverlink sync folder is the main case;
-  see https://github.com/philips/readwise-supernote-digest/issues/1. Because the title is cached
-  and sticky, a later upgrade to real metadata won't rename already-exported highlights.
 - Notes (`source_type = 2`): title = the `.note` file name, page from `metadata.note_page`; needs
   its own toggle, and a decision on whether handwriting recognition text belongs in Readwise.
 - XMP metadata for PDFs whose Info dictionary is empty (2 of 12 sampled).
-- UI: a toggle and pending count next to the existing export, plus a place to explain the read
-  permission before the OS prompt appears.
 
 ### 2. Known limitations (not scheduled)
 

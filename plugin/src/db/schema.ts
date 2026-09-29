@@ -77,6 +77,15 @@ export const CREATE_DOCUMENT_INFO_TABLE = `
   );
 `;
 
+/** Text of everything we exported to Readwise (normalised, see src/lib/textKey.ts). An export
+ * comes back on the next import as an ordinary highlight -- with the real book title for Documents
+ * entries -- and must not be pushed into Digest again as a Readwise-category duplicate. */
+export const CREATE_EXPORTED_TEXT_KEYS_TABLE = `
+  CREATE TABLE IF NOT EXISTS exported_text_keys (
+    text_key TEXT PRIMARY KEY NOT NULL
+  );
+`;
+
 export const SCHEMA_STATEMENTS: string[] = [
   CREATE_SETTINGS_TABLE,
   CREATE_HIGHLIGHTS_TABLE,
@@ -84,6 +93,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   CREATE_HIGHLIGHTS_BOOK_INDEX,
   CREATE_EXPORTED_DIGEST_ENTRIES_TABLE,
   CREATE_DOCUMENT_INFO_TABLE,
+  CREATE_EXPORTED_TEXT_KEYS_TABLE,
 ];
 
 /** Known `settings` table keys, centralized so callers don't hand-roll strings. */
