@@ -68,8 +68,13 @@ if [[ -n "$PREVIOUS" ]]; then
 fi
 
 echo
+# Never let npx fetch tools: without node_modules, `npx tsc` offers to install an unrelated
+# package called "tsc" from npm. Use only what `npm ci` put in plugin/node_modules.
+[[ -x plugin/node_modules/.bin/tsc && -x plugin/node_modules/.bin/jest && -x plugin/node_modules/.bin/eslint ]] \
+  || fail "plugin dependencies are not installed; run: (cd plugin && npm ci)"
 echo "Running the quick checks (typecheck, lint, jest)..."
-(cd plugin && npx tsc --noEmit && npx eslint src App.tsx index.js __tests__ && npx jest --ci >/dev/null)
+(cd plugin && npx --no-install tsc --noEmit && npx --no-install eslint src App.tsx index.js __tests__ \
+  && npx --no-install jest --ci >/dev/null) || fail "quick checks failed; fix them before releasing"
 echo "  ok"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
