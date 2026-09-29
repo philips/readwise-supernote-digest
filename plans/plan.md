@@ -218,24 +218,66 @@ more literal than originally planned:
 
 ---
 
-## Open items / risks to resolve before or during implementation
+## Open issues
 
-1. **Task 3/4 mechanism** — confirmed blocked via ContentProvider; plan above uses the note-file
-   fallback. Needs a real on-device probe once a plugin skeleton exists to be 100% sure there's no
-   other access path (see "still worth a cheap on-device experiment" above).
-2. **`textDigestData` exact schema** — undocumented as a value shape (just typed `string`). Should
-   reverse-engineer by manually using Supernote's built-in "save selection to digest" feature on the
-   device, then reading the resulting element via `PluginFileAPI.getElements`, before writing our
-   own values into it — otherwise our synced entries may render or behave differently from
-   native ones.
-3. **Android SDK not yet installed** on this dev machine (Node 22 ✅, JDK 25 ✅, but no
-   `ANDROID_HOME`/SDK Platform 35/Build-Tools). Needed before `buildPlugin.sh` can produce a
-   `.snplg`. Install before Task 1 build/deploy loop starts.
-4. **Background/periodic sync** — Tasks 3/4 imply some kind of recurring sync, not just
-   user-triggered. Need to check whether `sn-plugin-lib`/PluginHost supports any background
-   execution model beyond "plugin view is open," or whether this has to be manual/on-open only for
-   v1.
-5. **react-native pinned to 0.79.2 / react 19.0.0** — must not drift (see vendored skill).
+Resolved this round (see "Round 3 fixes" at the end of this file): duplicate re-import loop, stale
+Setup screenshot, leftover test entry, deleted highlights lingering in the local cache, and an
+empty-cache hole in export loop-prevention. Still open:
+
+### 1. Export Documents and Notes highlights to Readwise
+
+Task 4 only exports the **Manual Entry** tab (`source_type = 4`). Highlights the user makes while
+reading PDFs/EPUBs (**Documents**, `source_type = 1`) or that are saved from handwritten notes
+(**Notes**, `source_type = 2`) never reach Readwise. Those are arguably the most valuable ones to
+export -- they are the actual reading highlights.
+
+What we have to work with (`docs/KNOWLEDGE_PROVIDER.md`): the Digest row has **no title or author
+column**. Available: `content`, `source_path` (absolute path to the PDF/EPUB/.note), `source_page`,
+`metadata` (JSON; for notes: `note_page`, `note_pageId`, `note_fileId`), `creation_time`. Readwise
+wants `title` (required whenever `source_type` is set -- see the 400 we hit), `author`, and
+optionally `category` (`books`/`articles`), `location` + `location_type: "page"`, `source_url`.
+Readwise de-dupes on title + author + text + source_url, so a stable title/author per document
+matters: if title parsing changes between runs, every highlight re-imports as a duplicate.
+
+Approach to investigate, cheapest first:
+- **Filename heuristics.** Real examples on the device: `Concrete Mathematics_ A Fou... Donald E.
+  Knuth.pdf`, `Winnie-the-Pooh - A. A. Milne.epub`, `Fables - Aesop.epub`, `1987-mcdermott.pdf`,
+  `The_Boy_and_the_Tape.pdf`. Mixed: some have "Title - Author", most PDFs don't. Fallback only.
+- **EPUB metadata.** An EPUB is a zip; `META-INF/container.xml` points at the OPF, which has
+  `<dc:title>` / `<dc:creator>`. Easy in Kotlin (`java.util.zip` + an XML parser) -- no new
+  dependency, but it's another native method in `KnowledgeProviderModule` (or a sibling module).
+- **PDF metadata.** The Info dictionary (`/Title`, `/Author`) or XMP. Trailer/xref parsing by hand
+  is fragile (compressed object streams, encrypted files); a library such as PdfBox-Android is the
+  robust option but adds APK size and needs `node_change/`-style vendoring. Many PDFs (e.g.
+  scanned/converted papers) have empty or junk Info, so filename fallback is still required.
+- **Notes.** Title = the `.note` file name (no author; use the user, or omit). Page from
+  `metadata.note_page`. Needs a decision on whether handwritten-note highlights belong in
+  Readwise at all -- probably behind its own toggle.
+- Cache parsed title/author per `source_path` (SQLite) so files are parsed once, and so the
+  title stays stable for Readwise's de-dupe.
+- Parsing the files means reading them from the plugin process. We currently declare only
+  `INTERNET` and `FILE:WRITE`; the native module would read via plain `java.io`/`ContentResolver`
+  in pluginhost's process, so first check what pluginhost can actually open (e.g.
+  `/storage/emulated/0/Document`) and whether the SDK's `FILE:READ` gate applies to native code
+  (it did gate native sockets for INTERNET, so assume yes and declare it).
+- Bookkeeping: `exported_digest_entries` is already keyed by Digest row id, so it extends as is.
+  Loop prevention is unaffected (these rows are never in the Readwise category).
+- Also decide what to do about the highlight's own color/handwriting annotations (`comment_str`,
+  handwriting) -- could map `comment_str` to Readwise's `note`.
+
+### 2. Known limitations (not scheduled)
+
+- **Readwise -> Digest deletions.** When a highlight is deleted on Readwise we now drop it from the
+  local cache, but the corresponding Digest entry stays: `delete()` on the provider is
+  trusted-caller-only (docs/KNOWLEDGE_PROVIDER.md), so a plugin cannot remove Digest rows.
+- **Edits aren't propagated** in either direction: an exported entry is tracked by Digest row id
+  only, so editing it later in Digest is not re-sent (Readwise's `highlight_url` update trick could
+  do it); likewise edits on Readwise don't update the Digest copy.
+- **Undocumented provider.** The whole Digest integration depends on reverse-engineered behavior
+  (uid 1000 permission grant, URI schema) that a firmware update could change without notice.
+- **Background sync.** Everything is manual or on-open; there's no periodic sync while the plugin
+  is closed. Not investigated whether PluginHost supports any background model.
+- **react-native pinned at 0.79.2 / react 19.0.0** by the host (see vendored skill).
 
 ## Suggested build order
 
@@ -546,3 +588,56 @@ zero errors the whole way. Opened the real Digest app (`KnowledgeActivity`) afte
   no warning and no changelog to check against. Worth a defensive try/catch around the whole Task 3
   flow surfacing a clear "Digest sync isn't working, Supernote may have changed something" error
   rather than a raw exception, and worth re-verifying after any firmware update.
+
+## Task 4 implementation notes: export Digest entries to Readwise
+
+- `KnowledgeProviderModule.queryManualEntries` lists `source_type = 4` rows via the bare
+  `knowledge` dir URI with a raw `selection` string (that path concatenates `selection` into SQL
+  unparameterized; see docs/KNOWLEDGE_PROVIDER.md). Filtering out our own Readwise-category rows
+  happens in JS (`src/lib/digestExport.ts`), comparing against the cached
+  `SettingsKey.DigestCategoryUniqueAttribute`.
+- `exported_digest_entries` (Task 1 schema) now tracks exported Digest row ids.
+- Found on-device: Readwise's create endpoint returns 400 "Title is required when source_type is
+  specified" -- not obvious from the API docs. Exports use `title: 'Supernote Digest'`.
+- Verified: created one uncategorized Manual Entry by hand; pending count showed exactly 1 of 6473
+  (the 6472 Readwise-tagged rows correctly excluded); export succeeded; a following "Sync now"
+  pulled it back (6472 -> 6473), confirming it reached Readwise's servers.
+- Known wrinkle: the exported entry then re-imports as a normal highlight, so with "Sync into
+  Digest" on it would be pushed back into Digest as a Readwise-category entry (a duplicate of the
+  original hand-typed one). Not addressed yet.
+
+## UX: tabs
+
+App now has two tabs, copied in style/font size from philips/olaink (`src/theme.ts`,
+`src/components/Tab.tsx`): "Insert a Quote" (default) and "Sync and Export" (`SyncExport.tsx`,
+formerly `Home.tsx`). Setup screen fonts use the same scale. `docs/screenshots/01-setup.png` predates
+the font change and is stale; re-capture it next time the plugin is disconnected.
+
+## Round 3 fixes (open issues from the Task 4 / tabs round)
+
+1. **Re-import duplicate loop.** A Digest entry exported to Readwise came back on the next import
+   sync as an ordinary highlight and, with "Sync into Digest" on, would have been pushed back into
+   Digest as a Readwise-category duplicate. Readwise records our exports with
+   `source = "supernote_digest"` and book title "Supernote Digest" (confirmed via the export API);
+   `src/readwise/constants.ts` now holds those identifiers, and the DB layer marks any highlight
+   with that title as already synced to Digest (`markOwnExportsSyncedToDigest`, run after every
+   upsert and at init, so it also fixes rows cached earlier). Verified on-device: the Digest pending
+   count went from "1 highlight not yet in Digest" to "Digest is up to date."
+2. **Deleted highlights lingering in the cache.** Discovered while cleaning up the test entry: it
+   had been deleted on Readwise (book and highlight both `is_deleted: true` in the export API), but
+   our cache still counted it, because the import never requested deletions. Incremental syncs now
+   pass `includeDeleted=true` (first full sync doesn't need to), and a deleted book marks all its
+   highlights deleted. Verified: "Sync now" took the cached count from 6473 to 6472.
+   (Note: Readwise's *highlights* endpoint 404s for deleted ids, and the export endpoint reports
+   them with `is_deleted` -- only the latter is usable to detect deletions.)
+3. **Export loop-prevention with an empty cache.** The export skipped Readwise-category Digest
+   entries by comparing against the cached category id. If that cache was empty (plugin data reset,
+   or Export used before any Digest sync) nothing would be filtered and all ~6,472 Readwise entries
+   would have been re-exported to Readwise. It now falls back to a read-only lookup by name
+   (`KnowledgeProviderModule.findCategory`, returns null rather than creating anything). Verified
+   on-device: returns the category id for "Readwise", null for a nonexistent name.
+4. **Stale Setup screenshot.** Re-captured with the new fonts, without disconnecting: a temporary
+   build forced the Setup route so the saved token was never touched.
+5. **Leftover test entry.** Removed the "Task 4 test entry" from the Digest app through its own
+   Delete action (the plugin can't delete Digest rows); it was already gone from Readwise.
+6. **The "[pi] Work in progress" commit** was split into logical commits (see git log).
