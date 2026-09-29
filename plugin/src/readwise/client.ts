@@ -67,6 +67,8 @@ export async function validateToken(token: string): Promise<boolean> {
 export interface ExportPageParams {
   updatedAfter?: string;
   pageCursor?: string;
+  /** Also return highlights/books deleted on Readwise, flagged is_deleted. */
+  includeDeleted?: boolean;
 }
 
 /** GET /api/v2/export/ -- one page of the highlight export. Caller drives pagination via
@@ -85,6 +87,9 @@ export async function fetchExportPage(
   }
   if (params.pageCursor) {
     queryParts.push(`pageCursor=${encodeURIComponent(params.pageCursor)}`);
+  }
+  if (params.includeDeleted) {
+    queryParts.push('includeDeleted=true');
   }
   const qs = queryParts.join('&');
   const url = `${BASE_URL}/export/${qs ? `?${qs}` : ''}`;

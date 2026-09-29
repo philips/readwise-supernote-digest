@@ -22,7 +22,7 @@ const MAX_RATE_LIMIT_RETRIES = 3;
 
 async function fetchExportPageWithRetry(
   token: string,
-  params: {updatedAfter?: string; pageCursor?: string},
+  params: {updatedAfter?: string; pageCursor?: string; includeDeleted?: boolean},
   attempt = 0,
 ): ReturnType<typeof fetchExportPage> {
   try {
@@ -57,7 +57,13 @@ export async function syncHighlights(
   let highlightsSoFar = 0;
 
   do {
-    const response = await fetchExportPageWithRetry(token, {updatedAfter, pageCursor: cursor});
+    const response = await fetchExportPageWithRetry(token, {
+      updatedAfter,
+      pageCursor: cursor,
+      // Incremental syncs also need deletions, or a highlight removed on Readwise stays in the
+      // local cache forever. A first full sync has nothing to reconcile, so skip them there.
+      includeDeleted: updatedAfter !== undefined,
+    });
     const rows = response.results.flatMap(book => flattenExportBook(book, syncStartedAt));
     await upsertHighlights(rows);
 

@@ -141,7 +141,7 @@ export function flattenExportBook(
     // specific "link to this exact highlight" -- falls back to the dashboard page if absent.
     highlight_url: h.url ?? book.readwise_url ?? null,
     source_url: book.source_url ?? null,
-    is_deleted: h.is_deleted,
+    is_deleted: h.is_deleted || book.is_deleted,
     fetched_at: fetchedAt,
   }));
 }
