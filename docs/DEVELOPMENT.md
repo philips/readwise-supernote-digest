@@ -123,3 +123,21 @@ Highlights most likely to bite early:
 - https://github.com/philips/olaink — real-world monorepo plugin + Cloudflare Worker relay;
   source of the adb scripting patterns in `scripts/`.
 - https://github.com/gorlix/supernote-plugin-dev — the vendored skill/reference docs.
+
+## Tests
+
+```
+cd plugin && npx jest
+```
+
+Needs Node >= 22.13: the tests run the plugin's real SQL against Node's built-in SQLite
+(`node:sqlite`) through a small stand-in for `react-native-sqlite-storage`
+(`plugin/__tests__/helpers/sqliteMock.ts`). Only the device-facing edges are faked: the Digest
+ContentProvider, the Readwise HTTP client and permission prompts (`__tests__/helpers/env.ts`).
+
+Covered edge cases: the Digest -> Readwise -> Digest duplicate loop (`loop.test.ts`), export
+filtering incl. an empty category cache and partial batch failures (`digestExport.test.ts`), our
+own exports never re-entering Digest and resumable syncs (`digestSync.test.ts`), deletion handling
+and pagination (`readwiseSync.test.ts`), and the SQL rules themselves (`db.test.ts`).
+When touching loop prevention, sanity-check the tests by temporarily breaking the code: each of
+the rules above has at least one test that fails without it.
