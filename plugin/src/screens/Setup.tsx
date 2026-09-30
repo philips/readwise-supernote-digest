@@ -83,6 +83,10 @@ export default function Setup({onComplete}: Props): React.JSX.Element {
         onPress={() => Linking.openURL(ACCESS_TOKEN_URL).catch(() => {})}>
         {ACCESS_TOKEN_URL}
       </Text>
+      <Text style={styles.body}>
+        The plugin starts in read-only mode: it only reads from Readwise until you turn that off in
+        Sync and Export.
+      </Text>
 
       <TextInput
         style={styles.input}

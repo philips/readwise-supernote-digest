@@ -1,6 +1,7 @@
 # Plan: Read-only mode
 
-Status: **proposed, not implemented.** Decisions that need an answer are listed at the end.
+Status: **implemented.** Decisions 1-4 were accepted; the timed re-enable (5) was declined. See
+"Implementation notes" at the end for what was built and what changed from this plan.
 
 ## Goal
 
@@ -208,3 +209,28 @@ turning it off.
    accept, and say so in the release notes.*
 5. **Optional, not planned:** turning read-only back on automatically after a period, so it cannot be
    left off by accident. Easy to add later; say if you want it.
+
+## Implementation notes
+
+What was built follows the plan. The differences, and what testing found:
+
+- **Enforcement** is in `src/readwise/client.ts` (`readwiseFetch`, the only `fetch` in the app) and
+  `src/readwise/writeGuard.ts`. Setting key `readwise_writes_enabled`; only `'1'` permits writes;
+  re-read on every write request; any error means read-only. `readwiseFetch` is exported so the tests
+  exercise the real method check.
+- **Tests:** 78 new jest tests (guard matrix, client method matrix with `fetch` never called, feature
+  level incl. flipping mid-export, static "only one fetch" check). Mutation-checked: 13 ways of
+  weakening the protection, each fails at least one test. ESLint `no-restricted-globals` on `fetch`
+  (verified to fire on a stray call).
+- **On the device:** a fresh setting is read-only with the export controls locked; a probe calling
+  `createHighlights` and raw `POST/PUT/PATCH/DELETE/post` (with a deliberately invalid token as a
+  second safeguard) got `ReadwiseReadOnlyError` for every one; the confirmation, turning off, and
+  turning back on were walked through; Disconnect's confirmation was checked (and cancelled).
+- **Change from the plan: the UI controls.** The platform `Switch` is about 30x36 px on the Nomad and
+  was too small to see or hit (a tap on it did nothing on the device), and the native `Alert` used for
+  the confirmations rendered tiny with small teal text buttons. Both were replaced:
+  `components/Toggle.tsx` (a full-width bordered row, the whole row is the touch target, big ON/OFF
+  pill, dashed and muted when locked) and `components/ConfirmPanel.tsx` (an in-screen confirmation
+  with large Cancel / Turn off buttons). This applies to all three toggles and to Disconnect. The
+  screen is now scrollable.
+- Disconnect also turns read-only mode back on (decision 3), and says so in its confirmation.

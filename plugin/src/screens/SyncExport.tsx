@@ -1,9 +1,8 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -23,6 +22,13 @@ import {
   type DigestExportResult,
 } from '../lib/digestExport';
 import {ensureInternetPermission} from '../lib/permissions';
+import {
+  isReadwiseWriteAllowed,
+  ReadwiseReadOnlyError,
+  setReadwiseWritesEnabled,
+} from '../readwise/writeGuard';
+import ConfirmPanel from '../components/ConfirmPanel';
+import Toggle from '../components/Toggle';
 import {Color, FontSize} from '../theme';
 
 interface Props {
@@ -58,6 +64,12 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
   const [digestProgress, setDigestProgress] = useState<DigestSyncProgress | null>(null);
   const [digestError, setDigestError] = useState<string | null>(null);
 
+  // Read-only mode: nothing is sent to Readwise. Starts true (the safe answer) until the stored
+  // setting has been read; the real enforcement is in src/readwise/client.ts, not here.
+  const [readOnly, setReadOnly] = useState(true);
+  // Which confirmation is showing (in-screen, see ConfirmPanel), if any.
+  const [confirming, setConfirming] = useState<'leave-read-only' | 'disconnect' | null>(null);
+
   const [exportEnabled, setExportEnabled] = useState(false);
   const [exportPendingCount, setExportPendingCount] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -83,6 +95,7 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
     refreshExportPendingCount();
     getSetting(SettingsKey.DigestSyncEnabled).then(value => setDigestSyncEnabled(value === '1'));
     getSetting(SettingsKey.ReadwiseExportEnabled).then(value => setExportEnabled(value === '1'));
+    isReadwiseWriteAllowed().then(allowed => setReadOnly(!allowed));
   }, [refreshCount, refreshDigestPendingCount, refreshExportPendingCount]);
 
   const handleDigestSync = async () => {
@@ -109,7 +122,14 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
       setExportSummary(summarizeExport(result));
       await refreshExportPendingCount();
     } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'Export to Readwise failed.');
+      if (err instanceof ReadwiseReadOnlyError) {
+        // Not a failure: read-only mode was on, or was turned on while this export was running.
+        setReadOnly(true);
+        setExportSummary(err.message);
+        await refreshExportPendingCount();
+      } else {
+        setExportError(err instanceof Error ? err.message : 'Export to Readwise failed.');
+      }
     } finally {
       setExporting(false);
     }
@@ -139,7 +159,13 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         await handleDigestSync();
       }
       if (exportEnabled) {
-        await handleExport();
+        // Read the setting now rather than trusting the screen's copy of it.
+        if (await isReadwiseWriteAllowed()) {
+          await handleExport();
+        } else {
+          setReadOnly(true);
+          setExportSummary('Export skipped: read-only mode is on.');
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed.');
@@ -153,31 +179,41 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
     await setSetting(SettingsKey.DigestSyncEnabled, value ? '1' : '0');
   };
 
+  // After any change, show what is actually stored (not what we assume we just wrote).
+  const showStoredReadOnlyState = async () => setReadOnly(!(await isReadwiseWriteAllowed()));
+
+  const handleToggleReadOnly = (nextReadOnly: boolean) => {
+    if (nextReadOnly) {
+      setConfirming(null);
+      setReadwiseWritesEnabled(false).then(showStoredReadOnlyState).catch(showStoredReadOnlyState);
+      return;
+    }
+    // Turning it off lets the plugin write to a real account, so ask first.
+    setConfirming('leave-read-only');
+  };
+
+  const confirmLeaveReadOnly = async () => {
+    setConfirming(null);
+    await setReadwiseWritesEnabled(true).catch(() => undefined);
+    await showStoredReadOnlyState();
+    setExportSummary(null);
+  };
+
   const handleToggleExport = async (value: boolean) => {
     setExportEnabled(value);
     await setSetting(SettingsKey.ReadwiseExportEnabled, value ? '1' : '0');
   };
 
-  const handleDisconnect = () => {
-    Alert.alert(
-      'Disconnect Readwise?',
-      'This clears the saved API token. Your cached highlights stay on the device.',
-      [
-        {text: 'Cancel', style: 'cancel'},
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteSetting(SettingsKey.ReadwiseApiToken);
-            onSignOut();
-          },
-        },
-      ],
-    );
+  const confirmDisconnect = async () => {
+    setConfirming(null);
+    // A new connection starts read-only again, whatever was allowed before.
+    await setReadwiseWritesEnabled(false);
+    await deleteSetting(SettingsKey.ReadwiseApiToken);
+    onSignOut();
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Highlights cached</Text>
         <Text style={styles.cardValue}>{count === null ? '…' : count}</Text>
@@ -205,17 +241,18 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
       ) : null}
 
       <View style={styles.section}>
-        <View style={styles.toggleRow}>
-          <Text style={styles.sectionLabel}>Sync into Digest</Text>
-          <Switch value={digestSyncEnabled} onValueChange={handleToggleDigestSync} />
-        </View>
-        <Text style={styles.subtext}>
-          {digestPendingCount === null
-            ? ' '
-            : digestPendingCount === 0
-              ? 'Digest is up to date.'
-              : `${digestPendingCount} highlight${digestPendingCount === 1 ? '' : 's'} not yet in Digest.`}
-        </Text>
+        <Toggle
+          label="Sync into Digest"
+          subtext={
+            digestPendingCount === null
+              ? ' '
+              : digestPendingCount === 0
+                ? 'Digest is up to date.'
+                : `${digestPendingCount} highlight${digestPendingCount === 1 ? '' : 's'} not yet in Digest.`
+          }
+          value={digestSyncEnabled}
+          onChange={handleToggleDigestSync}
+        />
 
         {digestError ? <Text style={styles.error}>{digestError}</Text> : null}
 
@@ -240,18 +277,41 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
       </View>
 
       <View style={styles.section}>
-        <View style={styles.toggleRow}>
-          <Text style={styles.sectionLabel}>Export Digest to Readwise</Text>
-          <Switch value={exportEnabled} onValueChange={handleToggleExport} />
-        </View>
-        <Text style={styles.subtext}>
-          {exportPendingCount === null
-            ? ' '
-            : exportPendingCount === 0
-              ? 'Nothing new to export.'
-              : `${exportPendingCount} Digest ${exportPendingCount === 1 ? 'entry' : 'entries'} not yet on Readwise.`}
-        </Text>
+        <Toggle
+          label="Read-only mode"
+          subtext={
+            readOnly
+              ? 'Nothing is ever sent to Readwise. Turn off to allow exporting.'
+              : 'Exporting can add highlights to your Readwise account.'
+          }
+          value={readOnly}
+          onChange={handleToggleReadOnly}
+        />
+        {confirming === 'leave-read-only' ? (
+          <ConfirmPanel
+            title="Turn off read-only mode?"
+            message="Exporting will be able to add highlights to your Readwise account."
+            confirmLabel="Turn off"
+            onConfirm={confirmLeaveReadOnly}
+            onCancel={() => setConfirming(null)}
+          />
+        ) : null}
 
+        <Toggle
+          label="Export Digest to Readwise"
+          subtext={
+            readOnly
+              ? `Locked while read-only mode is on.${exportPendingCount ? ` (${exportPendingCount} waiting.)` : ''}`
+              : exportPendingCount === null
+                ? ' '
+                : exportPendingCount === 0
+                  ? 'Nothing new to export.'
+                  : `${exportPendingCount} Digest ${exportPendingCount === 1 ? 'entry' : 'entries'} not yet on Readwise.`
+          }
+          value={exportEnabled}
+          onChange={handleToggleExport}
+          disabled={readOnly}
+        />
         <Text style={styles.subtext}>
           Includes highlights from books. Their title and author are read from the file, which needs
           file access; without it the file name is used.
@@ -261,13 +321,19 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         {exportSummary ? <Text style={styles.subtext}>{exportSummary}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.secondaryButton, exporting && styles.buttonDisabled]}
+          style={[
+            styles.secondaryButton,
+            exporting && styles.buttonDisabled,
+            readOnly && styles.buttonLocked,
+          ]}
           onPress={handleExport}
-          disabled={exporting}>
+          disabled={exporting || readOnly}>
           {exporting ? (
             <ActivityIndicator color={Color.text} />
           ) : (
-            <Text style={styles.secondaryButtonText}>Export to Readwise now</Text>
+            <Text style={[styles.secondaryButtonText, readOnly && styles.lockedLabel]}>
+              Export to Readwise now
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -280,16 +346,30 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         ) : null}
       </View>
 
-      <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
+      {confirming === 'disconnect' ? (
+        <ConfirmPanel
+          title="Disconnect Readwise?"
+          message="This clears the saved API token and turns read-only mode back on. Your cached highlights stay on the device."
+          confirmLabel="Disconnect"
+          destructive
+          onConfirm={confirmDisconnect}
+          onCancel={() => setConfirming(null)}
+        />
+      ) : null}
+      <TouchableOpacity style={styles.disconnectButton} onPress={() => setConfirming('disconnect')}>
         <Text style={styles.disconnectButtonText}>Disconnect Readwise</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
+    backgroundColor: Color.background,
+  },
+  container: {
+    flexGrow: 1,
     padding: 24,
     backgroundColor: Color.background,
   },
@@ -345,21 +425,19 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     marginBottom: 8,
   },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  sectionLabel: {
-    fontSize: FontSize.body,
-    color: Color.text,
-    fontWeight: '700',
-  },
   subtext: {
     fontSize: FontSize.meta,
     color: Color.mutedText,
     marginBottom: 14,
+  },
+  // "Not available" on the Nomad's e-ink display: opacity alone is too faint to read as disabled,
+  // so a locked control also gets a dashed border and muted text.
+  buttonLocked: {
+    borderStyle: 'dashed',
+    borderColor: Color.mutedBorder,
+  },
+  lockedLabel: {
+    color: Color.mutedText,
   },
   disconnectButton: {
     paddingVertical: 16,
