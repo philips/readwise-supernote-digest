@@ -244,11 +244,13 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         <Toggle
           label="Sync into Digest"
           subtext={
-            digestPendingCount === null
-              ? ' '
-              : digestPendingCount === 0
-                ? 'Digest is up to date.'
-                : `${digestPendingCount} highlight${digestPendingCount === 1 ? '' : 's'} not yet in Digest.`
+            !digestSyncEnabled
+              ? `Turn on to sync highlights into Digest.${digestPendingCount ? ` (${digestPendingCount} waiting.)` : ''}`
+              : digestPendingCount === null
+                ? ' '
+                : digestPendingCount === 0
+                  ? 'Digest is up to date.'
+                  : `${digestPendingCount} highlight${digestPendingCount === 1 ? '' : 's'} not yet in Digest.`
           }
           value={digestSyncEnabled}
           onChange={handleToggleDigestSync}
@@ -257,13 +259,19 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         {digestError ? <Text style={styles.error}>{digestError}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.secondaryButton, digestSyncing && styles.buttonDisabled]}
+          style={[
+            styles.secondaryButton,
+            digestSyncing && styles.buttonDisabled,
+            !digestSyncEnabled && styles.buttonLocked,
+          ]}
           onPress={handleDigestSync}
-          disabled={digestSyncing}>
+          disabled={digestSyncing || !digestSyncEnabled}>
           {digestSyncing ? (
             <ActivityIndicator color={Color.text} />
           ) : (
-            <Text style={styles.secondaryButtonText}>Sync to Digest now</Text>
+            <Text style={[styles.secondaryButtonText, !digestSyncEnabled && styles.lockedLabel]}>
+              Sync to Digest now
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -278,7 +286,7 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
 
       <View style={styles.section}>
         <Toggle
-          label="Read-only mode"
+          label="Readwise Read-only mode"
           subtext={
             readOnly
               ? 'Nothing is ever sent to Readwise. Turn off to allow exporting.'
@@ -289,7 +297,7 @@ export default function SyncExport({onSignOut}: Props): React.JSX.Element {
         />
         {confirming === 'leave-read-only' ? (
           <ConfirmPanel
-            title="Turn off read-only mode?"
+            title="Turn off Readwise read-only mode?"
             message="Exporting will be able to add highlights to your Readwise account."
             confirmLabel="Turn off"
             onConfirm={confirmLeaveReadOnly}

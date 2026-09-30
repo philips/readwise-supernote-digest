@@ -29,9 +29,9 @@ The result is a normal textbox on the page — resizable/movable like anything e
 ### Sync and Export tab
 
 Highlight count, manual "Sync now", and large tap-anywhere toggles (sized for the Nomad's e-ink display)
-for the two Digest integrations below and for **Read-only mode**.
+for the two Digest integrations below and for **Readwise Read-only mode**.
 
-**Read-only mode is on by default**: the plugin only reads from Readwise, and nothing it does can change
+**Readwise Read-only mode is on by default**: the plugin only reads from Readwise, and nothing it does can change
 your Readwise account. While it is on, the export controls are locked and say why. Turning it off asks
 for confirmation. The rule is enforced in the Readwise client itself (not just by disabling buttons), so
 no screen or future feature can write around it.
