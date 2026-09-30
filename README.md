@@ -11,37 +11,27 @@ Supernote.
 
 ### Connect your Readwise account and cache highlights on-device
 
-Paste your [Readwise access token](https://readwise.io/access_token) once; the plugin validates
-it, does a full export sync, and keeps a local SQLite cache so everything after that is instant
-and works offline.
+Paste or type your [Readwise access token](https://readwise.io/access_token); the plugin validates it, does a full Readwise export, and keeps a local SQLite cache so everything after that is instant and works offline.
 
 <img src="docs/screenshots/01-setup.png" width="360" alt="Connect Readwise screen">
 
 ### Insert any highlight into the note you're writing
 
-The plugin opens on the **Insert a Quote** tab. Search across all cached highlights by text,
-book, or author, and insert one as a real textbox directly onto the current page.
+The plugin opens on the **Insert a Quote** tab. Search across all cached highlights by text, book, or author, and insert one as a real textbox directly onto the current page.
 
 <img src="docs/screenshots/03-insert-quote-picker.png" width="360" alt="Insert a Quote tab with search">
 
-The result is a normal textbox on the page — resizable/movable like anything else in a note.
+The result is a normal textbox on the note page.
 
 ### Sync and Export tab
 
-Highlight count, manual "Sync now", and large tap-anywhere toggles (sized for the Nomad's e-ink display)
-for the two Digest integrations below and for **Readwise Read-only mode**.
-
-**Readwise Read-only mode is on by default**: the plugin only reads from Readwise, and nothing it does can change
-your Readwise account. While it is on, the export controls are locked and say why. Turning it off asks
-for confirmation. The rule is enforced in the Readwise client itself (not just by disabling buttons), so
-no screen or future feature can write around it.
+**Readwise Read-only mode is on by default**: the plugin only reads from Readwise by default. While read-only mode is on, the export to Readwise controls are locked.
 
 <img src="docs/screenshots/02-home.png" width="360" alt="Sync and Export tab">
 
 ### Integrate with Supernote's Digest app
 
-Highlights get synced into the actual on-device Digest app (Settings/NOTE sidebar → Digest),
-not a lookalike — tagged with a `Readwise` category so they're easy to filter, alongside anything
+Highlights get synced into the Supernote Digest app tagged with a `Readwise` category so they're easy to filter, alongside anything
 you save to Digest yourself.
 
 <img src="docs/screenshots/05-digest-entry.png" width="360" alt="A synced highlight in the native Digest app, tagged Category: Readwise">
@@ -50,8 +40,7 @@ you save to Digest yourself.
 
 ### Export your own Digest entries back to Readwise
 
-Anything *you* save to Digest (not synced in from Readwise) can be exported back to your Readwise
-library, with automatic loop-prevention so Readwise-sourced entries never get re-exported.
+Anything *you* save to Digest (not synced in from Readwise) can be exported back to your Readwise library.
 
 ## Install
 
