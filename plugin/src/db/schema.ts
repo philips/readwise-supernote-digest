@@ -102,6 +102,10 @@ export const SettingsKey = {
   LastExportUpdatedAfter: 'last_export_updated_after',
   DigestSyncEnabled: 'digest_sync_enabled',
   ReadwiseExportEnabled: 'readwise_export_enabled',
+  /** Read-only mode, stored inverted on purpose: ONLY the exact string '1' allows anything to be
+   * sent to Readwise. Missing, empty, '0', garbage -- all mean read-only, so the default and every
+   * failure mode are safe. See src/readwise/writeGuard.ts and plans/read-only-mode.md. */
+  ReadwiseWritesEnabled: 'readwise_writes_enabled',
   DigestCategory: 'digest_category',
   /** Cached `unique_attribute` of the native Digest "knowledge_base" row matching
    * SettingsKey.DigestCategory, so we don't need to look it up (or risk re-creating it) on every

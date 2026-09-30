@@ -9,6 +9,7 @@ import {
 import {resolveDocumentInfo, type DocumentInfo} from './documentInfo/resolve';
 import {parseFilename} from './documentInfo/filename';
 import {createHighlights} from '../readwise/client';
+import {assertReadwiseWritesAllowed, ReadwiseReadOnlyError} from '../readwise/writeGuard';
 import {
   getSetting,
   getExportedDigestEntryKeys,
@@ -194,6 +195,11 @@ export interface DigestExportResult {
 export async function exportPendingDigestEntries(
   onProgress?: (progress: DigestExportProgress) => void,
 ): Promise<DigestExportResult> {
+  // Early exit, so a read-only run does no work at all: no file reads, no permission prompts.
+  // This is not the safety net -- createHighlights() re-checks on every request (and so does each
+  // batch below), which also stops an export in progress if read-only mode is turned on meanwhile.
+  await assertReadwiseWritesAllowed();
+
   const token = await getReadwiseApiToken();
   if (!token) {
     throw new DigestExportError('No Readwise token saved -- please reconnect.');
@@ -246,6 +252,9 @@ export async function exportPendingDigestEntries(
     try {
       await createHighlights(token, inputs);
     } catch (err) {
+      if (err instanceof ReadwiseReadOnlyError) {
+        throw err; // let the caller tell "stopped by read-only mode" from a real failure
+      }
       throw new DigestExportError(
         err instanceof Error ? `Could not export to Readwise: ${err.message}` : String(err),
       );

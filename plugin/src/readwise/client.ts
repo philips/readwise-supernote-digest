@@ -3,6 +3,7 @@ import type {
   ReadwiseCreateHighlightsResponse,
   ReadwiseExportResponse,
 } from './types';
+import {assertReadwiseWritesAllowed} from './writeGuard';
 
 const BASE_URL = 'https://readwise.io/api/v2';
 
@@ -31,6 +32,33 @@ export class ReadwiseApiError extends Error {
   }
 }
 
+// Allowlist, not blocklist: anything that is not known to be a plain read is treated as a write.
+const SAFE_METHODS = new Set(['GET', 'HEAD']);
+
+/** True for every method except GET/HEAD (case-insensitive) -- and for anything that is not a
+ * string at all, which `fetch` would reject anyway. An absent method is GET. */
+export function isWriteMethod(method: unknown): boolean {
+  if (method === undefined) {return false;}
+  if (typeof method !== 'string') {return true;}
+  return !SAFE_METHODS.has(method.toUpperCase());
+}
+
+/**
+ * The ONLY place in the app that calls `fetch` (a jest test and an ESLint rule keep it that way).
+ * Exported so the tests can exercise the real method check; other modules should use the typed
+ * functions below.
+ * A request that could change something on Readwise is refused, before any network I/O, unless
+ * read-only mode has been turned off -- see src/readwise/writeGuard.ts. The setting is read on
+ * every such request, so turning read-only mode on stops the next request, not the next launch.
+ */
+export async function readwiseFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (isWriteMethod(init.method)) {
+    await assertReadwiseWritesAllowed();
+  }
+  // eslint-disable-next-line no-restricted-globals
+  return fetch(url, init);
+}
+
 function authHeader(token: string): Record<string, string> {
   return {Authorization: `Token ${token}`};
 }
@@ -54,7 +82,7 @@ async function handleErrorResponse(res: Response): Promise<never> {
 
 /** GET /api/v2/auth/ -- returns true if the token is valid (204), false if invalid (401). */
 export async function validateToken(token: string): Promise<boolean> {
-  const res = await fetch(`${BASE_URL}/auth/`, {
+  const res = await readwiseFetch(`${BASE_URL}/auth/`, {
     method: 'GET',
     headers: authHeader(token),
   });
@@ -94,7 +122,7 @@ export async function fetchExportPage(
   const qs = queryParts.join('&');
   const url = `${BASE_URL}/export/${qs ? `?${qs}` : ''}`;
 
-  const res = await fetch(url, {method: 'GET', headers: authHeader(token)});
+  const res = await readwiseFetch(url, {method: 'GET', headers: authHeader(token)});
   if (!res.ok) {
     await handleErrorResponse(res);
   }
@@ -108,7 +136,7 @@ export async function createHighlights(
   highlights: ReadwiseCreateHighlightInput[],
 ): Promise<ReadwiseCreateHighlightsResponse> {
   if (highlights.length === 0) {return [];}
-  const res = await fetch(`${BASE_URL}/highlights/`, {
+  const res = await readwiseFetch(`${BASE_URL}/highlights/`, {
     method: 'POST',
     headers: {
       ...authHeader(token),

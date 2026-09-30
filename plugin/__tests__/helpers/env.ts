@@ -22,9 +22,25 @@ export interface Fakes {
   getOrCreateDigestCategory: jest.Mock;
   findDigestCategory: jest.Mock;
   fetchExportPage: jest.Mock;
+  /** Only in realClient mode: the global fetch that the real Readwise client ends up calling. */
+  fetch: jest.Mock;
 }
 
-export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
+export interface LoadEnvOptions {
+  /** Reuse the in-memory database of the previous loadEnv (simulates an app restart). */
+  keepDatabase?: boolean;
+  /**
+   * Read-only mode. Default `true` = writes ENABLED (read-only off), so the suites written before
+   * read-only mode existed keep meaning what they meant. `false` = the real default: the setting is
+   * absent and everything is read-only. Ignored with keepDatabase, which keeps what is stored.
+   */
+  writesEnabled?: boolean;
+  /** Use the real readwise/client (and so the real write guard) on top of a fake global fetch,
+   * instead of the fakes. */
+  realClient?: boolean;
+}
+
+export async function loadEnv(options: LoadEnvOptions = {}) {
   jest.resetModules();
   if (!options.keepDatabase) {
     (globalThis as any).__sqliteTestDbs?.clear();
@@ -44,6 +60,13 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
     }),
     findDigestCategory: jest.fn(async (name: string) => fakes.categories[name] ?? null),
     fetchExportPage: jest.fn(),
+    fetch: jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: {get: () => null},
+      json: async () => [],
+      text: async () => '',
+    })),
   };
 
   jest.doMock('../../src/lib/knowledgeProvider', () => ({
@@ -64,16 +87,20 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
   jest.doMock('../../src/lib/documentInfo/nativeBridge', () => ({
     readDocumentMetadata: (...args: unknown[]) => fakes.readDocumentMetadata(...args),
   }));
-  jest.doMock('../../src/readwise/client', () => {
-    class ReadwiseRateLimitError extends Error {
-      retryAfterSeconds = 0;
-    }
-    return {
-      createHighlights: fakes.createHighlights,
-      fetchExportPage: fakes.fetchExportPage,
-      ReadwiseRateLimitError,
-    };
-  });
+  if (options.realClient) {
+    (globalThis as any).fetch = fakes.fetch;
+  } else {
+    jest.doMock('../../src/readwise/client', () => {
+      class ReadwiseRateLimitError extends Error {
+        retryAfterSeconds = 0;
+      }
+      return {
+        createHighlights: fakes.createHighlights,
+        fetchExportPage: fakes.fetchExportPage,
+        ReadwiseRateLimitError,
+      };
+    });
+  }
 
   const db = require('../../src/db');
   const digestExport = require('../../src/lib/digestExport');
@@ -82,10 +109,15 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
   const schema = require('../../src/db/schema');
   const constants = require('../../src/readwise/constants');
   const types = require('../../src/readwise/types');
+  const writeGuard = require('../../src/readwise/writeGuard');
+  const client = require('../../src/readwise/client');
   const documentResolve = require('../../src/lib/documentInfo/resolve');
 
   await db.initDatabase();
   await db.setSetting(schema.SettingsKey.ReadwiseApiToken, 'test-token');
+  if (!options.keepDatabase) {
+    await writeGuard.setReadwiseWritesEnabled(options.writesEnabled ?? true);
+  }
 
   return {
     fakes,
@@ -96,6 +128,8 @@ export async function loadEnv(options: {keepDatabase?: boolean} = {}) {
     schema,
     constants,
     types,
+    writeGuard,
+    client,
     documentResolve,
     resolveDocumentInfo: documentResolve.resolveDocumentInfo,
   };
