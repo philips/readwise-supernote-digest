@@ -309,6 +309,294 @@ class DocumentMetadataReaderTest {
     assertEquals("Escaped key", m.title)
   }
 
+  // ---- PDF: XMP ---------------------------------------------------------------------------
+
+  private val dcNs = "http://purl.org/dc/elements/1.1/"
+
+  private fun xmp(inner: String, prolog: String = "") =
+      """<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>$prolog
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:dc="$dcNs">$inner</rdf:Description></rdf:RDF></x:xmpmeta>
+<?xpacket end="w"?>"""
+
+  private fun title(t: String, lang: String = "x-default") =
+      """<dc:title><rdf:Alt><rdf:li xml:lang="$lang">$t</rdf:li></rdf:Alt></dc:title>"""
+
+  private fun creators(vararg names: String) =
+      "<dc:creator><rdf:Seq>${names.joinToString("") { "<rdf:li>$it</rdf:li>" }}</rdf:Seq></dc:creator>"
+
+  /** Catalog carries /Metadata; Info optional. XMP bytes are used verbatim. */
+  private fun pdfWithXmp(
+      xmpBytes: ByteArray,
+      info: String? = null,
+      streamDict: String = "/Type /Metadata /Subtype /XML",
+      catalogExtra: String = "/Metadata 4 0 R",
+  ): File {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Pages 2 0 R $catalogExtra >>")
+    pdf.obj(2, "<< /Type /Pages /Kids [] /Count 0 >>")
+    if (info != null) pdf.obj(3, info)
+    pdf.streamObj(4, streamDict, xmpBytes)
+    pdf.classicXref(5, "/Root 1 0 R" + if (info != null) " /Info 3 0 R" else "")
+    return write("x.pdf", pdf.out.toByteArray())
+  }
+
+  private fun pdfWithXmp(text: String, info: String? = null) =
+      pdfWithXmp(text.toByteArray(Charsets.UTF_8), info)
+
+  @Test fun xmpOnlyNoInfoDictionary() {
+    val m = read(pdfWithXmp(xmp(title("Only In XMP") + creators("Xavier Author", "Second Author"))))!!
+    assertEquals("pdf", m.format)
+    assertNull(m.title)
+    assertEquals(emptyList<String>(), m.authors)
+    assertEquals("Only In XMP", m.xmpTitle)
+    assertEquals(listOf("Xavier Author", "Second Author"), m.xmpAuthors)
+  }
+
+  @Test fun infoAndXmpAreReportedSeparately() {
+    val m =
+        read(
+            pdfWithXmp(
+                xmp(title("XMP Title") + creators("XMP Author")),
+                info = "<< /Title (Info Title) /Author (Info Author) >>",
+            ))!!
+    assertEquals("Info Title", m.title)
+    assertEquals(listOf("Info Author"), m.authors)
+    assertEquals("XMP Title", m.xmpTitle)
+    assertEquals(listOf("XMP Author"), m.xmpAuthors)
+  }
+
+  @Test fun infoOnlyLeavesXmpEmpty() {
+    val m = read(pdfWithInfo("<< /Title (T) /Author (A) >>"))!!
+    assertNull(m.xmpTitle)
+    assertEquals(emptyList<String>(), m.xmpAuthors)
+  }
+
+  @Test fun xmpXDefaultBeatsEarlierLanguages() {
+    val alt =
+        """<dc:title><rdf:Alt><rdf:li xml:lang="de">Der Titel</rdf:li>
+           <rdf:li xml:lang="x-default">The Title</rdf:li></rdf:Alt></dc:title>"""
+    assertEquals("The Title", read(pdfWithXmp(xmp(alt)))!!.xmpTitle)
+  }
+
+  @Test fun xmpWithoutXDefaultTakesFirstNonEmpty() {
+    val alt =
+        """<dc:title><rdf:Alt><rdf:li xml:lang="fr"></rdf:li>
+           <rdf:li xml:lang="de">Der Titel</rdf:li><rdf:li xml:lang="en">The Title</rdf:li></rdf:Alt></dc:title>"""
+    assertEquals("Der Titel", read(pdfWithXmp(xmp(alt)))!!.xmpTitle)
+  }
+
+  @Test fun xmpPropertyWithoutRdfLi() {
+    assertEquals("Plain", read(pdfWithXmp(xmp("<dc:title>Plain</dc:title>")))!!.xmpTitle)
+  }
+
+  @Test fun xmpMatchesNamespaceNotPrefix() {
+    val custom = """<q:title xmlns:q="$dcNs"><rdf:Alt><rdf:li xml:lang="x-default">Odd Prefix</rdf:li></rdf:Alt></q:title>"""
+    assertEquals("Odd Prefix", read(pdfWithXmp(xmp(custom)))!!.xmpTitle)
+  }
+
+  @Test fun xmpLookalikeElementsInOtherNamespacesAreIgnored() {
+    val other = """<foo:title xmlns:foo="http://example.com/ns/"><rdf:Alt><rdf:li>Not Dublin Core</rdf:li></rdf:Alt></foo:title>"""
+    assertNull(read(pdfWithXmp(xmp(other + creators("A. Uthor"))))!!.xmpTitle)
+  }
+
+  @Test fun xmpEntitiesAndUnicode() {
+    val m = read(pdfWithXmp(xmp(title("Horowitz &amp; Hill: \u00c6sop") + creators("Andr\u00e9 &lt;X&gt;"))))!!
+    assertEquals("Horowitz & Hill: \u00c6sop", m.xmpTitle)
+    assertEquals(listOf("Andr\u00e9 <X>"), m.xmpAuthors)
+  }
+
+  @Test fun xmpBlankItemsAreSkipped() {
+    val m = read(pdfWithXmp(xmp(title("  ") + creators("", "  ", "Real Author"))))!!
+    assertNull(m.xmpTitle)
+    assertEquals(listOf("Real Author"), m.xmpAuthors)
+  }
+
+  @Test fun xmpFirstNonEmptyOfSeveralDescriptionBlocks() {
+    val packet =
+        """<?xpacket begin="x" id="y"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description xmlns:dc="$dcNs">${title("")}</rdf:Description>
+        <rdf:Description xmlns:dc="$dcNs">${title("Second Block")}${creators("Someone")}</rdf:Description>
+        </rdf:RDF></x:xmpmeta><?xpacket end="w"?>"""
+    val m = read(pdfWithXmp(packet))!!
+    assertEquals("Second Block", m.xmpTitle)
+    assertEquals(listOf("Someone"), m.xmpAuthors)
+  }
+
+  @Test fun xmpWithOnlyTitleOrOnlyAuthor() {
+    assertEquals(emptyList<String>(), read(pdfWithXmp(xmp(title("T"))))!!.xmpAuthors)
+    assertNull(read(pdfWithXmp(xmp(creators("A. Uthor"))))!!.xmpTitle)
+  }
+
+  @Test fun xmpWithNeitherTitleNorAuthorAndNoInfoIsNull() {
+    assertNull(read(pdfWithXmp(xmp("<dc:format>application/pdf</dc:format>"))))
+  }
+
+  @Test fun xmpCompressedStream() {
+    val packet = xmp(title("Deflated Title") + creators("Deflated Author")).toByteArray()
+    val f = pdfWithXmp(deflate(packet), streamDict = "/Type /Metadata /Subtype /XML /Filter /FlateDecode")
+    assertEquals("Deflated Title", read(f)!!.xmpTitle)
+  }
+
+  @Test fun xmpUtf16WithBom() {
+    val text = "<?xml version=\"1.0\"?>" + xmp(title("Sixteen \u2603") + creators("Wide Author")).substringAfter("?>")
+    val bytes = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + text.toByteArray(Charsets.UTF_16LE)
+    val m = read(pdfWithXmp(bytes))!!
+    assertEquals("Sixteen \u2603", m.xmpTitle)
+    assertEquals(listOf("Wide Author"), m.xmpAuthors)
+  }
+
+  @Test fun xmpMalformedKeepsGoodInfo() {
+    val m = read(pdfWithXmp("<x:xmpmeta><dc:title>unclosed", info = "<< /Title (Good Info) >>"))!!
+    assertEquals("Good Info", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun xmpMalformedAndNoInfoIsNull() {
+    assertNull(read(pdfWithXmp("not xml at all")))
+  }
+
+  @Test fun brokenInfoKeepsGoodXmp() {
+    val m = read(pdfWithXmp(xmp(title("Good XMP")), info = "<< /Title (unterminated"))!!
+    assertNull(m.title)
+    assertEquals("Good XMP", m.xmpTitle)
+  }
+
+  @Test fun corruptCatalogKeepsGoodInfo() {
+    // The catalog dictionary itself is unparseable, so the XMP path throws; Info must survive.
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Metadata 4 0 R /Broken (unterminated >>")
+    pdf.obj(3, "<< /Title (Survivor) /Author (Someone) >>")
+    pdf.classicXref(5, "/Root 1 0 R /Info 3 0 R")
+    val m = read(write("cc.pdf", pdf.out.toByteArray()))!!
+    assertEquals("Survivor", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun onlyTheFirstCreatorPropertyWithContentIsUsed() {
+    val packet =
+        """<?xpacket begin="x" id="y"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description xmlns:dc="$dcNs">${creators("First Block")}</rdf:Description>
+        <rdf:Description xmlns:dc="$dcNs">${creators("Second Block")}</rdf:Description>
+        </rdf:RDF></x:xmpmeta><?xpacket end="w"?>"""
+    assertEquals(listOf("First Block"), read(pdfWithXmp(packet))!!.xmpAuthors)
+  }
+
+  @Test fun metadataReferenceToMissingObjectIsIgnored() {
+    val f = pdfWithInfoAndCatalog("<< /Title (Still Fine) >>", "/Metadata 9 0 R")
+    val m = read(f)!!
+    assertEquals("Still Fine", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun metadataThatIsNotAStreamIsIgnored() {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Metadata 4 0 R >>")
+    pdf.obj(3, "<< /Title (Dict Not Stream) >>")
+    pdf.obj(4, "<< /Not /AStream >>")
+    pdf.classicXref(5, "/Root 1 0 R /Info 3 0 R")
+    val m = read(write("ns.pdf", pdf.out.toByteArray()))!!
+    assertEquals("Dict Not Stream", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun metadataWithAbsurdLengthIsIgnored() {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Metadata 4 0 R >>")
+    pdf.obj(3, "<< /Title (Length Lies) >>")
+    pdf.offsets[4] = pdf.out.size()
+    pdf.raw("4 0 obj\n<< /Type /Metadata /Length 999999999 >>\nstream\n<x/>\nendstream\nendobj\n")
+    pdf.classicXref(5, "/Root 1 0 R /Info 3 0 R")
+    val m = read(write("len.pdf", pdf.out.toByteArray()))!!
+    assertEquals("Length Lies", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun oversizedXmpPacketIsIgnored() {
+    val padding = "<!-- ${" ".repeat(2 * 1024 * 1024 + 10)} -->"
+    val f = pdfWithXmp(xmp(title("Too Big") + padding), info = "<< /Title (Small Info) >>")
+    val m = read(f)!!
+    assertEquals("Small Info", m.title)
+    assertNull(m.xmpTitle)
+  }
+
+  @Test fun onlyTheCatalogsXmpIsUsedNotPerImagePackets() {
+    // Real files carry an XMP packet per image/page (one here has 953 /Metadata references).
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Pages 2 0 R >>") // no /Metadata on the catalog
+    pdf.obj(2, "<< /Type /Pages /Kids [] /Count 0 >>")
+    pdf.obj(3, "<< /Title (Document Title) >>")
+    pdf.streamObj(4, "/Type /Metadata /Subtype /XML", xmp(title("IMAGE TITLE") + creators("Photographer")).toByteArray())
+    pdf.obj(5, "<< /Type /XObject /Subtype /Image /Metadata 4 0 R >>")
+    pdf.classicXref(6, "/Root 1 0 R /Info 3 0 R")
+    val m = read(write("img.pdf", pdf.out.toByteArray()))!!
+    assertEquals("Document Title", m.title)
+    assertNull(m.xmpTitle)
+    assertEquals(emptyList<String>(), m.xmpAuthors)
+  }
+
+  @Test fun encryptedFileIsStillRefusedEvenWithXmp() {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Metadata 4 0 R >>")
+    pdf.streamObj(4, "/Type /Metadata", xmp(title("Secret")).toByteArray())
+    pdf.obj(5, "<< /Filter /Standard >>")
+    pdf.classicXref(6, "/Root 1 0 R /Encrypt 5 0 R")
+    assertNull(read(write("enc.pdf", pdf.out.toByteArray())))
+  }
+
+  @Test fun xmpExternalEntityIsNotResolved() {
+    val secret = tmp.newFile("xmp-secret.txt").also { it.writeText("TOP-SECRET") }
+    val prolog = """<!DOCTYPE x [<!ENTITY xxe SYSTEM "file://${secret.absolutePath}">]>"""
+    val m = read(pdfWithXmp(xmp(title("&xxe;") + creators("Someone"), prolog), info = "<< /Title (I) >>"))
+    assertEquals(false, (m?.xmpTitle ?: "").contains("TOP-SECRET"))
+  }
+
+  @Test fun catalogInsideAnObjectStreamWithAnXrefStream() {
+    // Modern producers pack the catalog into an object stream; /Metadata is a plain stream object.
+    val pdf = Pdf()
+    val packet = xmp(title("Packed Catalog Title") + creators("Packed Author")).toByteArray()
+    pdf.streamObj(1, "/Type /Metadata /Subtype /XML", packet)
+    val catalogText = "<< /Type /Catalog /Metadata 1 0 R >>"
+    val header = "3 0 "
+    pdf.streamObj(2, "/Type /ObjStm /N 1 /First ${header.length} /Filter /FlateDecode", deflate((header + catalogText).toByteArray()))
+    val xrefPos = pdf.out.size()
+    val rows = ByteArrayOutputStream()
+    rows.write(xrefRow(0, 0, 65535))
+    rows.write(xrefRow(1, pdf.offsets[1]!!, 0))
+    rows.write(xrefRow(1, pdf.offsets[2]!!, 0))
+    rows.write(xrefRow(2, 2, 0)) // object 3: in object stream 2, index 0
+    rows.write(xrefRow(1, xrefPos, 0))
+    val data = deflate(rows.toByteArray())
+    pdf.raw("4 0 obj\n<< /Type /XRef /Size 5 /W [1 4 2] /Root 3 0 R /Filter /FlateDecode /Length ${data.size} >>\nstream\n")
+    pdf.raw(data)
+    pdf.raw("\nendstream\nendobj\nstartxref\n$xrefPos\n%%EOF\n")
+    val m = read(write("packed.pdf", pdf.out.toByteArray()))!!
+    assertEquals("Packed Catalog Title", m.xmpTitle)
+    assertEquals(listOf("Packed Author"), m.xmpAuthors)
+  }
+
+  @Test fun xmpInIncrementalUpdateNewestCatalogWins() {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Metadata 4 0 R >>")
+    pdf.streamObj(4, "/Type /Metadata", xmp(title("Old XMP")).toByteArray())
+    val first = pdf.classicXref(5, "/Root 1 0 R")
+    pdf.streamObj(4, "/Type /Metadata", xmp(title("New XMP")).toByteArray())
+    val pos = pdf.out.size()
+    pdf.raw("xref\n4 1\n${String.format("%010d 00000 n \n", pdf.offsets[4])}")
+    pdf.raw("trailer\n<< /Size 5 /Root 1 0 R /Prev $first >>\nstartxref\n$pos\n%%EOF\n")
+    assertEquals("New XMP", read(write("incx.pdf", pdf.out.toByteArray()))!!.xmpTitle)
+  }
+
+  /** Info dictionary plus a catalog carrying extra entries. */
+  private fun pdfWithInfoAndCatalog(info: String, catalogExtra: String): File {
+    val pdf = Pdf()
+    pdf.obj(1, "<< /Type /Catalog /Pages 2 0 R $catalogExtra >>")
+    pdf.obj(2, "<< /Type /Pages /Kids [] /Count 0 >>")
+    pdf.obj(3, info)
+    pdf.classicXref(4, "/Root 1 0 R /Info 3 0 R")
+    return write("c.pdf", pdf.out.toByteArray())
+  }
+
   // ---- Format sniffing --------------------------------------------------------------------
 
   @Test fun nonDocumentFilesAreIgnored() {

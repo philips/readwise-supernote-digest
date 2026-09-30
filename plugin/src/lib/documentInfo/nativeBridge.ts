@@ -8,6 +8,10 @@ export interface NativeDocumentMetadata {
   format?: 'pdf' | 'epub';
   title?: string;
   authors?: string[];
+  /** PDF only: the document's XMP dc:title / dc:creator, separate from the Info dictionary values
+   * above so either can be skipped when it is junk. */
+  xmpTitle?: string;
+  xmpAuthors?: string[];
   error?: string;
 }
 

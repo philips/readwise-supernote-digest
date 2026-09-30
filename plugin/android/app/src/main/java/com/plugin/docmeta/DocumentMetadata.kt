@@ -11,6 +11,11 @@ data class DocumentMetadata(
     val format: String, // "pdf" | "epub"
     val title: String?,
     val authors: List<String>,
+    /** PDF only: the document's XMP `dc:title` / `dc:creator`, kept separate from the Info
+     * dictionary values above so the caller can fall through when one of them is junk (an Info
+     * title of "Microsoft Word - x.doc" next to a good XMP title, or the reverse). */
+    val xmpTitle: String? = null,
+    val xmpAuthors: List<String> = emptyList(),
 )
 
 object DocumentMetadataReader {

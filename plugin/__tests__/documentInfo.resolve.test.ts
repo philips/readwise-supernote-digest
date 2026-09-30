@@ -70,6 +70,72 @@ describe('resolveDocumentInfo: source priority', () => {
   });
 });
 
+describe('resolveDocumentInfo: XMP alongside the Info dictionary', () => {
+  const pdf = (extra: object) => ({exists: true, size: 1, mtime: 1, format: 'pdf', ...extra});
+
+  test('XMP alone (no Info dictionary) is used', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(pdf({authors: [], xmpTitle: 'XMP Title', xmpAuthors: ['Xena Author']}));
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({
+      title: 'XMP Title', author: 'Xena Author', titleSource: 'embedded', authorSource: 'embedded',
+    });
+  });
+
+  test('Info wins when both are good', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(
+      pdf({title: 'Info Title', authors: ['Info Author'], xmpTitle: 'XMP Title', xmpAuthors: ['XMP Author']}),
+    );
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({title: 'Info Title', author: 'Info Author'});
+  });
+
+  test('a junk Info title falls through to a good XMP title', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(
+      pdf({title: 'Microsoft Word - draft.doc', authors: ['Ann Author'], xmpTitle: 'The Real Title'}),
+    );
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({
+      title: 'The Real Title', author: 'Ann Author', titleSource: 'embedded',
+    });
+  });
+
+  test('a junk Info author falls through to a good XMP author', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(
+      pdf({title: 'Good', authors: ['Admin'], xmpTitle: 'Good', xmpAuthors: ['Real Person']}),
+    );
+    expect((await resolveDocumentInfo(PATH)).author).toBe('Real Person');
+  });
+
+  test('fields fall through independently: Info title, XMP author', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(pdf({title: 'Info Title', authors: [], xmpAuthors: ['XMP Author']}));
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({title: 'Info Title', author: 'XMP Author'});
+  });
+
+  test('junk in both (Untitled / Unknown) falls back to the filename', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(
+      pdf({title: 'Untitled', authors: ['Unknown'], xmpTitle: 'Untitled', xmpAuthors: ['Unknown']}),
+    );
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({
+      title: 'Some Book', titleSource: 'filename', author: 'Filename Author', authorSource: 'filename',
+    });
+  });
+
+  test('several XMP creators are joined', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue(pdf({xmpTitle: 'T', xmpAuthors: ['One Person', 'Two Person']}));
+    expect((await resolveDocumentInfo(PATH)).author).toBe('One Person, Two Person');
+  });
+
+  test('missing xmp fields (EPUB, or an older native build) are fine', async () => {
+    const {native, resolveDocumentInfo} = await setup();
+    native.readDocumentMetadata.mockResolvedValue({exists: true, size: 1, mtime: 1, format: 'epub', title: 'Emma', authors: ['Ed']});
+    expect(await resolveDocumentInfo(PATH)).toMatchObject({title: 'Emma', author: 'Ed'});
+  });
+});
+
 describe('resolveDocumentInfo: paths', () => {
   test('Digest source paths are relative to shared storage', async () => {
     const {native, resolveDocumentInfo} = await setup();

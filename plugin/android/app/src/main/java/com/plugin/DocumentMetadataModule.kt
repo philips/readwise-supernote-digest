@@ -46,6 +46,10 @@ class DocumentMetadataModule(reactContext: ReactApplicationContext) :
         val authors = Arguments.createArray()
         meta.authors.forEach { authors.pushString(it) }
         out.putArray("authors", authors)
+        if (meta.xmpTitle != null) out.putString("xmpTitle", meta.xmpTitle)
+        val xmpAuthors = Arguments.createArray()
+        meta.xmpAuthors.forEach { xmpAuthors.pushString(it) }
+        out.putArray("xmpAuthors", xmpAuthors)
       }
     } catch (e: Throwable) {
       out.putString("error", "${e.javaClass.simpleName}: ${e.message}")

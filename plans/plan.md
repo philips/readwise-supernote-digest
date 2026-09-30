@@ -289,6 +289,25 @@ source_url, so the title must come from the file and must be **stable** across r
   (Documents 5, Manual Entry 6473). 45 new jest tests, mutation-checked (two initially weak tests
   were found this way and rewritten).
 
+**Done: XMP metadata for PDFs** (`docmeta/XmpMetadataReader.kt`)
+- The catalog's `/Metadata` stream (`/Root` -> `/Metadata`) is parsed for `dc:title` (x-default
+  preferred, else the first non-empty language) and `dc:creator`, matching by namespace URI. It is
+  reported next to the Info values (`xmpTitle`/`xmpAuthors`), so each field falls through
+  independently when one source is junk. Info and XMP fail independently: a corrupt catalog cannot
+  cost the Info title, nor the reverse. Works when the catalog sits in an object stream, with
+  Flate-compressed or UTF-16 packets, across incremental updates; capped at 2 MB; XXE-safe;
+  encrypted files still refused.
+- **Only the document's own packet is read.** PDFs can carry one XMP packet per image or page (one
+  real file here has 953 `/Metadata` references and its per-page packet says `Print`); scanning for
+  the first `dc:title` would file highlights under that.
+- Result on the 48 PDFs in the library: parsed cleanly in 40, never disagreed with Info, and
+  recovered nothing usable (one file's XMP title is `Untitled`, which is junk). The six PDFs with no
+  title anywhere really have no metadata and still use the filename. So this is a safety net for
+  other people's files (Word/InDesign exports often have XMP but no Info), not an improvement to
+  this library.
+- 29 more JVM tests (65 total) and 8 jest tests, mutation-checked; two survivors found that way
+  became tests (corrupt catalog next to a good Info; only the first `dc:creator`).
+
 **Known rough edges**
 - Titles are cached and never change, and Readwise de-dupes on title + author: whatever was first
   exported stays. Winnie-the-Pooh's EPUB lists its illustrator first without a role attribute, so it
@@ -299,7 +318,6 @@ source_url, so the title must come from the file and must be **stable** across r
 **Still to do**
 - Notes (`source_type = 2`): title = the `.note` file name, page from `metadata.note_page`; needs
   its own toggle, and a decision on whether handwriting recognition text belongs in Readwise.
-- XMP metadata for PDFs whose Info dictionary is empty (2 of 12 sampled).
 
 ### 2. Known limitations (not scheduled)
 

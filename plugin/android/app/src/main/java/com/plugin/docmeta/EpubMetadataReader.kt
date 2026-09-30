@@ -1,12 +1,9 @@
 package com.plugin.docmeta
 
 import java.io.File
-import java.io.InputStream
 import java.util.zip.ZipFile
-import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 import org.w3c.dom.Node
-import org.xml.sax.InputSource
 
 /**
  * EPUB = zip. META-INF/container.xml names the OPF package document, whose <metadata> block has
@@ -20,36 +17,12 @@ internal object EpubMetadataReader {
   fun read(file: File): DocumentMetadata? {
     ZipFile(file).use { zip ->
       val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
-      val container = zip.getInputStream(containerEntry).use { parse(it) } ?: return null
+      val container = zip.getInputStream(containerEntry).use { XmlSupport.parse(it) } ?: return null
       val opfPath = findRootfile(container) ?: return null
 
       val opfEntry = zip.getEntry(opfPath) ?: zip.getEntry(decodeUrl(opfPath)) ?: return null
-      val opf = zip.getInputStream(opfEntry).use { parse(it) } ?: return null
+      val opf = zip.getInputStream(opfEntry).use { XmlSupport.parse(it) } ?: return null
       return extract(opf)
-    }
-  }
-
-  private fun parse(stream: InputStream): org.w3c.dom.Document? {
-    val factory = DocumentBuilderFactory.newInstance()
-    factory.isNamespaceAware = true
-    factory.isExpandEntityReferences = false
-    // Not every JAXP implementation (Android's included) supports every hardening feature.
-    for (feature in listOf(
-        "http://apache.org/xml/features/disallow-doctype-decl",
-        "http://xml.org/sax/features/external-general-entities",
-        "http://xml.org/sax/features/external-parameter-entities",
-    )) {
-      try {
-        factory.setFeature(feature, feature.endsWith("disallow-doctype-decl"))
-      } catch (_: Exception) {}
-    }
-    val builder = factory.newDocumentBuilder()
-    // Whatever the parser does with a DOCTYPE, never fetch anything.
-    builder.setEntityResolver { _, _ -> InputSource(java.io.StringReader("")) }
-    return try {
-      builder.parse(stream)
-    } catch (_: Exception) {
-      null
     }
   }
 

@@ -40,6 +40,7 @@ internal class PdfMetadataReader(private val raf: RandomAccessFile) {
   private fun readUnsafe(): DocumentMetadata? {
     val sections = ArrayList<Section>()
     var infoRef: PdfRef? = null
+    var rootRef: PdfRef? = null
 
     var offset: Long? = findStartXref()
     val seen = HashSet<Long>()
@@ -48,15 +49,56 @@ internal class PdfMetadataReader(private val raf: RandomAccessFile) {
       sections.add(section)
       if (trailer.containsKey("Encrypt")) return null
       if (infoRef == null) infoRef = trailer["Info"] as? PdfRef
+      if (rootRef == null) rootRef = trailer["Root"] as? PdfRef
       offset = (trailer["Prev"] as? Long)
     }
-    val ref = infoRef ?: return null
 
-    val info = loadObject(ref.num, sections) as? Map<*, *> ?: return null
-    val title = stringValue(info["Title"], sections)
-    val author = stringValue(info["Author"], sections)
-    if (title == null && author == null) return null
-    return DocumentMetadata("pdf", title, if (author == null) emptyList() else listOf(author))
+    // The two sources are independent: a broken one must not cost us the other.
+    var title: String? = null
+    var author: String? = null
+    if (infoRef != null) {
+      tolerant {
+        val info = loadObject(infoRef.num, sections) as? Map<*, *>
+        if (info != null) {
+          title = stringValue(info["Title"], sections)
+          author = stringValue(info["Author"], sections)
+        }
+      }
+    }
+    var xmp: XmpMetadataReader.Result? = null
+    if (rootRef != null) {
+      tolerant { xmp = readXmp(rootRef, sections) }
+    }
+
+    if (title == null && author == null && xmp == null) return null
+    return DocumentMetadata(
+        "pdf",
+        title,
+        if (author == null) emptyList() else listOf(author!!),
+        xmp?.title,
+        xmp?.authors ?: emptyList(),
+    )
+  }
+
+  private inline fun tolerant(block: () -> Unit) {
+    try {
+      block()
+    } catch (_: IllegalArgumentException) {
+    } catch (_: java.io.EOFException) {
+    }
+  }
+
+  /**
+   * The document's own XMP: catalog (/Root) -> /Metadata -> stream. Deliberately not "find the
+   * first dc:title in the file": PDFs can carry an XMP packet per image or page (one real file here
+   * has 953 /Metadata references), and those describe something else.
+   */
+  private fun readXmp(rootRef: PdfRef, sections: List<Section>): XmpMetadataReader.Result? {
+    val catalog = loadObject(rootRef.num, sections) as? Map<*, *> ?: return null
+    val metadataRef = catalog["Metadata"] as? PdfRef ?: return null
+    val packet = loadStream(metadataRef.num, sections) ?: return null
+    if (packet.size > MAX_XMP_BYTES) return null
+    return XmpMetadataReader.parse(packet)
   }
 
   // -- locating the xref ---------------------------------------------------------------------
@@ -194,6 +236,14 @@ internal class PdfMetadataReader(private val raf: RandomAccessFile) {
     }
   }
 
+  /** Decoded bytes of stream object [num]. Streams cannot live inside object streams. */
+  private fun loadStream(num: Int, sections: List<Section>): ByteArray? {
+    val entry = lookup(num, sections) ?: return null
+    if (entry.type != 1) return null
+    val window = readBytes(entry.f2, minOf(65536L, fileLength - entry.f2).toInt())
+    return parseIndirectObject(entry.f2, window, PdfLexer(window, 0), sections)?.decodedStream
+  }
+
   private fun loadFromObjectStream(streamNum: Int, num: Int, sections: List<Section>): Any? {
     val e = lookup(streamNum, sections) ?: return null
     if (e.type != 1) return null
@@ -235,7 +285,9 @@ internal class PdfMetadataReader(private val raf: RandomAccessFile) {
       var length = dict["Length"]
       if (length is PdfRef) length = loadObject(length.num, sections)
       val len = (length as? Long)?.toInt() ?: return ParsedObject(value, dict, null)
-      if (dataStart + len > fileLength) return ParsedObject(value, dict, null)
+      if (len < 0 || len > MAX_STREAM_BYTES || dataStart + len > fileLength) {
+        return ParsedObject(value, dict, null)
+      }
       decoded = decodeStream(dict, readBytes(dataStart, len))
     }
     return ParsedObject(value, dict, decoded)
@@ -341,6 +393,9 @@ internal class PdfMetadataReader(private val raf: RandomAccessFile) {
   }
 
   companion object {
+    private const val MAX_STREAM_BYTES = 16 * 1024 * 1024 // xref/object streams of huge files
+    private const val MAX_XMP_BYTES = 2 * 1024 * 1024
+
     /** PDF "text string": UTF-16BE/LE with BOM, UTF-8 with BOM, else PDFDocEncoding (~Latin-1). */
     fun decodeTextString(b: ByteArray): String {
       if (b.size >= 2 && b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte())

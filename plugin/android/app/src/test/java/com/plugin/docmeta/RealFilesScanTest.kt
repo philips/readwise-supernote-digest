@@ -21,10 +21,10 @@ class RealFilesScanTest {
       val result =
           try {
             DocumentMetadataReader.read(f)?.let {
-              "${it.format}\t${it.title ?: ""}\t${it.authors.joinToString(" | ")}"
-            } ?: "-\t\t"
+              "${it.format}\t${it.title ?: ""}\t${it.authors.joinToString(" | ")}\t${it.xmpTitle ?: ""}\t${it.xmpAuthors.joinToString(" | ")}"
+            } ?: "-\t\t\t\t"
           } catch (e: Throwable) {
-            "ERROR\t${e.javaClass.simpleName}: ${e.message}\t"
+            "ERROR\t${e.javaClass.simpleName}: ${e.message}\t\t\t"
           }
       val ms = (System.nanoTime() - started) / 1_000_000
       lines.append("${f.name}\t${ms}ms\t$result\n")

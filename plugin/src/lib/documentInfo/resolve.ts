@@ -69,9 +69,14 @@ async function derive(
   sourcePath: string,
   embedded: Awaited<ReturnType<typeof readDocumentMetadata>>,
 ): Promise<DocumentInfo> {
+  // "Embedded" means the file's own metadata: for a PDF the Info dictionary first, then XMP;
+  // each field falls through independently when the earlier value is junk or missing.
+  const embeddedTitle = [embedded.title, embedded.xmpTitle].find(t => t && !isJunkTitle(t));
   const fromFile = {
-    title: embedded.title && !isJunkTitle(embedded.title) ? cleanTitle(embedded.title) : null,
-    author: embedded.authors ? joinAuthors(embedded.authors) : null,
+    title: embeddedTitle ? cleanTitle(embeddedTitle) : null,
+    author:
+      (embedded.authors ? joinAuthors(embedded.authors) : null) ??
+      (embedded.xmpAuthors ? joinAuthors(embedded.xmpAuthors) : null),
   };
   const fromName = parseFilename(sourcePath);
 
