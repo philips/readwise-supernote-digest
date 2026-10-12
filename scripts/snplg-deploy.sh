@@ -15,7 +15,7 @@
 #   2. deep-link the Settings plugin page:
 #        am start -n com.ratta.settings/.SettingsActivity \
 #                 -a com.ratta.settings.application.PluginManagerFragment
-#   3. tap: "Add Plugin" -> the .snplg file -> "Install"
+#   3. tap: "Add Plugin" (or "Choose Installation Package" / "Select Plugin Package") -> the .snplg file -> "Install"
 #      (uiautomator dump + XML parsing finds coordinates each time)
 #   4. wait for "PluginInstallManager: Install Success" in logcat
 #
@@ -92,7 +92,8 @@ ui_dump() {
 }
 
 # Tap the first visible node whose text equals any supplied label. Firmware has
-# renamed "Add Plugin" to "Choose Installation Package" on some versions.
+# renamed "Add Plugin" to "Choose Installation Package" on some versions, and to
+# "Select Plugin Package" on the firmware with the unified plugin coordinate system.
 ui_tap_text() {
   local text pt
   for text in "$@"; do
@@ -132,9 +133,9 @@ adb shell am start -n com.ratta.settings/.SettingsActivity \
 sleep 3
 
 # --- 3. tap: Add Plugin -> file -> Install --------------------------------
-step "tap: Add Plugin / Choose Installation Package"
+step "tap: Add Plugin / Choose Installation Package / Select Plugin Package"
 ui_dump
-ui_tap_text "Add Plugin" "Choose Installation Package"
+ui_tap_text "Add Plugin" "Choose Installation Package" "Select Plugin Package"
 
 step "tap: $NAME"
 ui_dump

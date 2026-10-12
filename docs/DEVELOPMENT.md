@@ -114,6 +114,12 @@ chooses the coordinate system from the library version the plugin *reports* (`Pl
   `src/lib/insertQuote.ts` has no EMR conversion; a test fails if `getPageDisplaySize()` is called anywhere.
 - If a feature ever uses stroke or lasso coordinates, do not convert with `PointUtils`: the SDK already
   returns pixels.
+- **Verified on a Nomad** (firmware `Chauvet.E103.2610091001`, PluginHost 1.00.2610090; its host contains
+  `reportSdkVersion` and logs `libVersion:0.2.3`): the plugin installs over the previous build in place, the host
+  restarts itself after a native upgrade ("restart host to release native dex mappings"), and Insert a Quote
+  stores its box at left 192 / right 1728 / top 80 on the 1920 x 2560 page.
+- On that firmware the Plugin Manager button is called **Select Plugin Package** (it was "Add Plugin" /
+  "Choose Installation Package"); `scripts/snplg-deploy.sh` handles all three.
 - To downgrade (for firmware that cannot be upgraded): `sn-plugin-lib@0.1.65` and use `getPageDisplaySize()`
   again in `insertQuote.ts`; the change is confined to that function.
 
