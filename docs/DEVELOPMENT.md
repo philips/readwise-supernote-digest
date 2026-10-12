@@ -97,32 +97,6 @@ scripts/snplg-logs.sh --quiet     # hide SDK verifyParams noise
 push `.snplg` → Settings → Apps → Plugins → Add Plugin → select file → Install → wait for
 `PluginInstallManager: Install Success` in logcat.
 
-## `sn-plugin-lib` version and firmware
-
-`sn-plugin-lib` later than 0.1.65 (we use 0.2.3) changed the plugin coordinate system: positions and
-sizes read from or written to the SDK are **Android pixel coordinates based on the actual page size**
-from `PluginFileAPI.getPageSize(path, page)`, not EMR coordinates and not `getPageDisplaySize()`. The host
-chooses the coordinate system from the library version the plugin *reports* (`PluginManager.init()` calls
-`reportSdkVersion`), not from the device's system version. Consequences:
-
-- **Firmware requirement.** The new library needs the firmware with plugin-system support (Chauvet 3.30.45
-  Beta for Manta/Nomad, 2.27.42 Beta for A5X/A6X). `reportSdkVersion` is called unguarded, so on older
-  firmware the plugin is expected to fail at start-up. Plugins built with 0.1.65 or earlier keep working on
-  both.
-- **Only `insertQuote.ts` is affected** of the APIs the release lists: it sizes the quote box from
-  `getPageSize`, which the host gates behind `FILE:READ` (so Insert a Quote now asks for that permission).
-  `src/lib/insertQuote.ts` has no EMR conversion; a test fails if `getPageDisplaySize()` is called anywhere.
-- If a feature ever uses stroke or lasso coordinates, do not convert with `PointUtils`: the SDK already
-  returns pixels.
-- **Verified on a Nomad** (firmware `Chauvet.E103.2610091001`, PluginHost 1.00.2610090; its host contains
-  `reportSdkVersion` and logs `libVersion:0.2.3`): the plugin installs over the previous build in place, the host
-  restarts itself after a native upgrade ("restart host to release native dex mappings"), and Insert a Quote
-  stores its box at left 192 / right 1728 / top 80 on the 1920 x 2560 page.
-- On that firmware the Plugin Manager button is called **Select Plugin Package** (it was "Add Plugin" /
-  "Choose Installation Package"); `scripts/snplg-deploy.sh` handles all three.
-- To downgrade (for firmware that cannot be upgraded): `sn-plugin-lib@0.1.65` and use `getPageDisplaySize()`
-  again in `insertQuote.ts`; the change is confined to that function.
-
 ## Gotchas worth remembering up front
 
 See `.claude/skills/supernote-plugin-dev/SKILL.md` "Common Gotchas" for the full numbered list.
