@@ -53,6 +53,12 @@ you save to Digest yourself.
 Anything *you* save to Digest (not synced in from Readwise) can be exported back to your Readwise
 library, with automatic loop-prevention so Readwise-sourced entries never get re-exported.
 
+## Requirements
+
+Supernote firmware with the unified plugin coordinate system: **Chauvet 3.30.45 Beta or later** on Manta / Nomad,
+**2.27.42 Beta or later** on A5X / A6X. The plugin is built with `sn-plugin-lib` 0.2.x, which reports its version to
+the device so the device switches to Android-pixel coordinates; older firmware may not know that call, so the plugin may not start there.
+
 ## Install
 
 Download `readwise-digest-vX.Y.Z.snplg` from the
