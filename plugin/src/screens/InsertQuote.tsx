@@ -1,26 +1,40 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import {listHighlights, markHighlightInsertedIntoNote} from '../db';
 import type {LocalHighlightRow} from '../readwise/types';
 import {insertQuoteIntoCurrentNote} from '../lib/insertQuote';
-import {Color, FontSize} from '../theme';
+import {
+  BodyText,
+  Dashes,
+  EmptyText,
+  SecondaryButton,
+  StatusText,
+  TextField,
+} from '../snuxlib';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const RESULTS_LIMIT = 30;
+const QUOTE_PREVIEW_CHARS = 280;
 
 type InsertState = 'idle' | 'inserting' | 'inserted' | 'error';
 
-/** Tab content -- no header/back button of its own, the tab bar in App.tsx is the only
- * navigation. See plans/plan.md for the "default to Insert a Quote" UX decision. */
-export default function InsertQuote(): React.JSX.Element {
+interface Props {
+  log: (text: string) => void;
+}
+
+function preview(text: string): string {
+  return text.length > QUOTE_PREVIEW_CHARS ? `${text.slice(0, QUOTE_PREVIEW_CHARS).trimEnd()}…` : text;
+}
+
+// The buttons carry no bottom margin, so give the rule room above it (and a little below).
+const styles = StyleSheet.create({
+  separator: {marginTop: 28, marginBottom: 4},
+});
+
+/** Tab content -- no header/back button of its own, the tab menu in App.tsx is the only
+ * navigation. See plans/plan.md for the "default to Insert a Quote" UX decision. The search field
+ * is first: the on-screen keyboard covers the lower half of the screen. */
+export default function InsertQuote({log}: Props): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<LocalHighlightRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +57,7 @@ export default function InsertQuote(): React.JSX.Element {
   }, [query, runSearch]);
 
   const handleInsert = async (row: LocalHighlightRow) => {
+    if (insertState[row.readwise_id] === 'inserting') {return;}
     setInsertError(null);
     setInsertState(prev => ({...prev, [row.readwise_id]: 'inserting'}));
     try {
@@ -59,143 +74,57 @@ export default function InsertQuote(): React.JSX.Element {
         ),
       );
       setInsertState(prev => ({...prev, [row.readwise_id]: 'inserted'}));
+      log(`Inserted quote ${row.readwise_id} into the note.`);
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not insert quote.';
       setInsertState(prev => ({...prev, [row.readwise_id]: 'error'}));
-      setInsertError(err instanceof Error ? err.message : 'Could not insert quote.');
+      setInsertError(message);
+      log(`Insert of quote ${row.readwise_id} failed: ${message}`);
     }
   };
 
-  const renderItem = ({item}: {item: LocalHighlightRow}) => {
-    const state = insertState[item.readwise_id] ?? 'idle';
-    const alreadyInserted = Boolean(item.inserted_into_note_at);
-    return (
-      <View style={styles.card}>
-        <Text style={styles.quoteText} numberOfLines={4}>
-          {item.text}
-        </Text>
-        {(item.book_title || item.book_author) && (
-          <Text style={styles.attribution} numberOfLines={1}>
-            {[item.book_title, item.book_author].filter(Boolean).join(' \u2014 ')}
-          </Text>
-        )}
-        <Pressable
-          style={[styles.insertButton, state === 'inserting' && styles.insertButtonDisabled]}
-          disabled={state === 'inserting'}
-          onPress={() => handleInsert(item)}>
-          {state === 'inserting' ? (
-            <ActivityIndicator size="small" color={Color.background} />
-          ) : (
-            <Text style={styles.insertButtonText}>
-              {state === 'inserted'
-                ? 'Inserted \u2713'
-                : alreadyInserted
-                  ? 'Insert again'
-                  : 'Insert into note'}
-            </Text>
-          )}
-        </Pressable>
-      </View>
-    );
-  };
-
   return (
-    <View style={styles.container}>
-      <TextInput
-        style={styles.searchInput}
+    <>
+      <TextField
         value={query}
         onChangeText={setQuery}
         placeholder="Search highlights, book, or author"
-        autoCapitalize="none"
-        autoCorrect={false}
       />
-
-      {insertError ? <Text style={styles.error}>{insertError}</Text> : null}
+      {insertError ? <StatusText>{insertError}</StatusText> : null}
 
       {loading ? (
-        <ActivityIndicator style={styles.loading} />
+        <EmptyText>Loading…</EmptyText>
       ) : results.length === 0 ? (
-        <Text style={styles.empty}>
+        <EmptyText>
           {query.trim().length > 0 ? 'No highlights match your search.' : 'No highlights cached yet.'}
-        </Text>
+        </EmptyText>
       ) : (
-        <FlatList
-          data={results}
-          keyExtractor={item => String(item.readwise_id)}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-        />
+        results.map(item => {
+          const state = insertState[item.readwise_id] ?? 'idle';
+          const attribution = [item.book_title, item.book_author].filter(Boolean).join(' \u2014 ');
+          return (
+            <React.Fragment key={item.readwise_id}>
+              <BodyText>{preview(item.text)}</BodyText>
+              {attribution ? <StatusText>{attribution}</StatusText> : null}
+              <SecondaryButton
+                label={
+                  state === 'inserting'
+                    ? 'Inserting…'
+                    : state === 'inserted'
+                      ? 'Inserted \u2713'
+                      : item.inserted_into_note_at
+                        ? 'Insert again'
+                        : 'Insert into note'
+                }
+                onPress={() => handleInsert(item)}
+              />
+              <View style={styles.separator}>
+                <Dashes />
+              </View>
+            </React.Fragment>
+          );
+        })
       )}
-    </View>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Color.background,
-    paddingTop: 20,
-  },
-  searchInput: {
-    marginHorizontal: 24,
-    borderWidth: 2,
-    borderColor: Color.border,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: FontSize.input,
-    marginBottom: 16,
-    color: Color.text,
-  },
-  loading: {
-    marginTop: 40,
-  },
-  empty: {
-    marginTop: 40,
-    textAlign: 'center',
-    color: Color.mutedText,
-    fontSize: FontSize.body,
-    paddingHorizontal: 24,
-  },
-  list: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  card: {
-    borderWidth: 2,
-    borderColor: Color.mutedBorder,
-    padding: 16,
-    marginBottom: 16,
-  },
-  quoteText: {
-    fontSize: FontSize.body,
-    lineHeight: FontSize.body * 1.35,
-    color: Color.text,
-    marginBottom: 8,
-  },
-  attribution: {
-    fontSize: FontSize.meta,
-    color: Color.mutedText,
-    marginBottom: 12,
-  },
-  insertButton: {
-    backgroundColor: Color.text,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 20,
-  },
-  insertButtonDisabled: {
-    opacity: 0.5,
-  },
-  insertButtonText: {
-    color: Color.background,
-    fontSize: FontSize.meta,
-    fontWeight: '600',
-  },
-  error: {
-    color: Color.error,
-    fontSize: FontSize.meta,
-    marginHorizontal: 24,
-    marginBottom: 12,
-  },
-});

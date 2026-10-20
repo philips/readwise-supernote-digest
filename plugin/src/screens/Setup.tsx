@@ -1,185 +1,105 @@
 import React, {useState} from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import {Linking} from 'react-native';
 import {validateToken, ReadwiseAuthError} from '../readwise/client';
-import {syncHighlights, type SyncProgress} from '../readwise/sync';
+import {syncHighlights} from '../readwise/sync';
 import {setSetting} from '../db';
 import {SettingsKey} from '../db/schema';
 import {ensureInternetPermission} from '../lib/permissions';
-import {Color, FontSize} from '../theme';
-
-type Status = 'idle' | 'checking-permission' | 'validating' | 'syncing' | 'error';
+import {
+  BodyText,
+  ListRow,
+  PrimaryButton,
+  SectionLabel,
+  StatusText,
+  TextField,
+} from '../snuxlib';
 
 const ACCESS_TOKEN_URL = 'https://readwise.io/access_token';
 
 interface Props {
   onComplete: () => void;
+  log: (text: string) => void;
 }
 
-export default function Setup({onComplete}: Props): React.JSX.Element {
+export default function Setup({onComplete, log}: Props): React.JSX.Element {
   const [token, setToken] = useState('');
-  const [status, setStatus] = useState<Status>('idle');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<SyncProgress | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
-  const busy = status === 'checking-permission' || status === 'validating' || status === 'syncing';
+  const fail = (message: string) => {
+    setError(message);
+    setStatus(null);
+    log(message);
+  };
 
   const handleConnect = async () => {
+    if (busy) {return;}
     const trimmed = token.trim();
     if (trimmed.length === 0) {
-      setError('Enter your Readwise API token first.');
+      fail('Enter your Readwise API token first.');
       return;
     }
     setError(null);
+    setBusy(true);
     try {
-      setStatus('checking-permission');
       const granted = await ensureInternetPermission();
       if (!granted) {
-        setStatus('error');
-        setError('Network access is required to connect to Readwise.');
+        fail('Network access is required to connect to Readwise.');
         return;
       }
 
-      setStatus('validating');
+      setStatus('Validating token…');
+      log('Validating token…');
       const valid = await validateToken(trimmed);
       if (!valid) {
-        setStatus('error');
-        setError('That token was rejected by Readwise. Double-check it and try again.');
+        fail('That token was rejected by Readwise. Double-check it and try again.');
         return;
       }
 
       await setSetting(SettingsKey.ReadwiseApiToken, trimmed);
+      log('Token accepted. Syncing highlights…');
 
-      setStatus('syncing');
-      setProgress(null);
-      await syncHighlights(trimmed, p => setProgress(p));
-
+      let lastLogged = 0;
+      await syncHighlights(trimmed, p => {
+        setStatus(`Syncing highlights — ${p.highlightsSoFar} so far (page ${p.page})`);
+        if (p.page !== lastLogged) {
+          lastLogged = p.page;
+          log(`Sync: ${p.highlightsSoFar} highlights so far (page ${p.page})`);
+        }
+      });
+      log('Connected to Readwise. Read-only mode is on.');
       onComplete();
     } catch (err) {
-      setStatus('error');
       if (err instanceof ReadwiseAuthError) {
-        setError('That token was rejected by Readwise. Double-check it and try again.');
+        fail('That token was rejected by Readwise. Double-check it and try again.');
       } else {
-        setError(err instanceof Error ? err.message : 'Something went wrong.');
+        fail(err instanceof Error ? err.message : 'Something went wrong.');
       }
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Connect Readwise</Text>
-      <Text style={styles.body}>
-        Paste your Readwise access token below. You can find it at:
-      </Text>
-      <Text
-        style={styles.link}
-        onPress={() => Linking.openURL(ACCESS_TOKEN_URL).catch(() => {})}>
-        {ACCESS_TOKEN_URL}
-      </Text>
-      <Text style={styles.body}>
+    <>
+      <SectionLabel>Readwise access token</SectionLabel>
+      <TextField value={token} onChangeText={setToken} placeholder="Paste your Readwise API token" />
+      <PrimaryButton label={busy ? 'Connecting…' : 'Connect'} onPress={handleConnect} />
+      {error ? <StatusText>{error}</StatusText> : null}
+      {status ? <StatusText>{status}</StatusText> : null}
+
+      <SectionLabel>Where to find it</SectionLabel>
+      <ListRow
+        title={ACCESS_TOKEN_URL}
+        meta="Tap to open in the browser"
+        onPress={() => Linking.openURL(ACCESS_TOKEN_URL).catch(() => {})}
+        solid
+      />
+      <BodyText>
         The plugin starts in read-only mode: it only reads from Readwise until you turn that off in
         Sync and Export.
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={token}
-        onChangeText={setToken}
-        placeholder="Readwise API token"
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry
-        editable={!busy}
-      />
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <TouchableOpacity
-        style={[styles.button, busy && styles.buttonDisabled]}
-        onPress={handleConnect}
-        disabled={busy}>
-        {busy ? (
-          <ActivityIndicator color={Color.background} />
-        ) : (
-          <Text style={styles.buttonText}>Connect</Text>
-        )}
-      </TouchableOpacity>
-
-      {status === 'validating' ? (
-        <Text style={styles.status}>Validating token…</Text>
-      ) : null}
-      {status === 'syncing' ? (
-        <Text style={styles.status}>
-          Syncing highlights{progress ? ` — ${progress.highlightsSoFar} so far (page ${progress.page})` : '…'}
-        </Text>
-      ) : null}
-    </View>
+      </BodyText>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    justifyContent: 'center',
-    backgroundColor: Color.background,
-  },
-  title: {
-    fontSize: FontSize.title,
-    fontWeight: '700',
-    marginBottom: 16,
-    color: Color.text,
-  },
-  body: {
-    fontSize: FontSize.body,
-    color: Color.mutedText,
-    marginBottom: 6,
-  },
-  link: {
-    fontSize: FontSize.body,
-    color: Color.text,
-    textDecorationLine: 'underline',
-    marginBottom: 24,
-  },
-  input: {
-    borderWidth: 2,
-    borderColor: Color.border,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: FontSize.input,
-    marginBottom: 16,
-    color: Color.text,
-  },
-  button: {
-    backgroundColor: Color.text,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: Color.background,
-    fontSize: FontSize.button,
-    fontWeight: '700',
-  },
-  error: {
-    color: Color.error,
-    fontSize: FontSize.meta,
-    marginBottom: 12,
-  },
-  status: {
-    marginTop: 16,
-    fontSize: FontSize.meta,
-    color: Color.mutedText,
-    textAlign: 'center',
-  },
-});
