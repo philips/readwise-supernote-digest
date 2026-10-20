@@ -42,6 +42,16 @@ EXPECTED="$(printf '%s\n' \
   PluginConfig.json \
   app.npk \
   drawable-mdpi/assets_icon.png \
+  drawable-mdpi/src_snuxlib_assets_icons_back.png \
+  drawable-mdpi/src_snuxlib_assets_icons_chevron.png \
+  drawable-mdpi/src_snuxlib_assets_icons_close.png \
+  drawable-mdpi/src_snuxlib_assets_icons_inbox.png \
+  drawable-mdpi/src_snuxlib_assets_icons_logs.png \
+  drawable-mdpi/src_snuxlib_assets_icons_pair.png \
+  drawable-mdpi/src_snuxlib_assets_icons_send.png \
+  drawable-mdpi/src_snuxlib_assets_icons_settings.png \
+  drawable-mdpi/src_snuxlib_assets_icons_user.png \
+  icon.png \
   readwise-digest.bundle | LC_ALL=C sort)"
 if [[ "$ENTRIES" != "$EXPECTED" ]]; then
   echo 'archive entry set mismatch (< expected, > actual):' >&2
