@@ -1,6 +1,6 @@
-import {PluginCommAPI, PluginNoteAPI, Element, type TextBox} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginFileAPI, PluginNoteAPI, Element, type TextBox} from 'sn-plugin-lib';
 import type {APIResponse} from './apiResponse';
-import {ensureFileWritePermission} from './permissions';
+import {ensureFileReadPermission, ensureFileWritePermission} from './permissions';
 
 /**
  * NOTE: `ElementType` (as used in the docs.supernote.com examples) is declared in
@@ -36,6 +36,28 @@ const CHARS_PER_LINE_ESTIMATE = 40;
 const LINE_HEIGHT_PX = 44;
 const MIN_HEIGHT_PX = 200;
 
+export interface TextRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Where the quote's text box goes on a page `pageWidth` pixels wide. All coordinates are Android
+ * pixels in the *actual page size* (what PluginFileAPI.getPageSize returns) -- the coordinate
+ * system of sn-plugin-lib later than 0.1.65.
+ */
+export function layoutQuoteBox(pageWidth: number, text: string): TextRect {
+  const width = Math.max(200, Math.round(pageWidth * WIDTH_RATIO));
+  // Centered horizontally -- previously left-anchored near the page edge, which put it right
+  // under the NOTE app's fixed left-side toolbar overlay and got visually cut off.
+  const left = Math.round((pageWidth - width) / 2);
+  const estimatedLines = Math.max(1, Math.ceil(text.length / CHARS_PER_LINE_ESTIMATE));
+  const height = Math.max(MIN_HEIGHT_PX, estimatedLines * LINE_HEIGHT_PX + LINE_HEIGHT_PX);
+  return {left, top: TOP_MARGIN_PX, right: left + width, bottom: TOP_MARGIN_PX + height};
+}
+
 export class InsertQuoteError extends Error {}
 
 /**
@@ -68,12 +90,22 @@ export async function insertQuoteIntoCurrentNote(quote: QuoteToInsert): Promise<
   }
   const page = pageRes.result;
 
-  const sizeRes = (await PluginCommAPI.getPageDisplaySize()) as unknown as APIResponse<{
-    width: number;
-    height: number;
-  }>;
+  // The page size that all coordinates are based on. With sn-plugin-lib later than 0.1.65 this is
+  // PluginFileAPI.getPageSize(file, page); getPageDisplaySize() is for 0.1.65 and earlier and gives
+  // positions that don't match (docs.supernote.com, "Coordinate System"). The host gates
+  // getPageSize behind FILE:READ.
+  const hasFileRead = await ensureFileReadPermission();
+  if (!hasFileRead) {
+    throw new InsertQuoteError(
+      'File read access is required to place the quote on the page. Allow it and try again.',
+    );
+  }
+  const sizeRes = (await PluginFileAPI.getPageSize(
+    pathRes.result,
+    page,
+  )) as unknown as APIResponse<{width: number; height: number}>;
   if (!sizeRes.success || !sizeRes.result) {
-    throw new InsertQuoteError('Could not determine the page size.');
+    throw new InsertQuoteError(sizeRes.error?.message ?? 'Could not determine the page size.');
   }
   const {width: pageWidth} = sizeRes.result;
 
@@ -83,12 +115,7 @@ export async function insertQuoteIntoCurrentNote(quote: QuoteToInsert): Promise<
   await PluginNoteAPI.saveCurrentNote();
 
   const text = formatQuoteText(quote);
-  const width = Math.max(200, Math.round(pageWidth * WIDTH_RATIO));
-  // Centered horizontally -- previously left-anchored near the page edge, which put it right
-  // under the NOTE app's fixed left-side toolbar overlay and got visually cut off.
-  const left = Math.round((pageWidth - width) / 2);
-  const estimatedLines = Math.max(1, Math.ceil(text.length / CHARS_PER_LINE_ESTIMATE));
-  const height = Math.max(MIN_HEIGHT_PX, estimatedLines * LINE_HEIGHT_PX + LINE_HEIGHT_PX);
+  const textRect = layoutQuoteBox(pageWidth, text);
 
   const createRes = (await PluginCommAPI.createElement(
     TYPE_TEXT,
@@ -105,12 +132,7 @@ export async function insertQuoteIntoCurrentNote(quote: QuoteToInsert): Promise<
     fontSize: DEFAULT_FONT_SIZE,
     fontPath: null,
     textContentFull: text,
-    textRect: {
-      left,
-      top: TOP_MARGIN_PX,
-      right: left + width,
-      bottom: TOP_MARGIN_PX + height,
-    },
+    textRect,
     textDigestData: null,
     textAlign: 0,
     textBold: 0,
